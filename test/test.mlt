@@ -1,0 +1,270 @@
+open! Core
+
+(* Normal compiler error for unknown layout. *)
+module _ : sig
+  val%template id : ('a : x). 'a -> 'a
+end = struct
+  let%template id (type a : x) (x : a) : a = x
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unknown layout x
+|}]
+
+(* Normal compiler error for unknown layout, in the presence of [@@kind]. *)
+module _ : sig
+  val%template id : ('a : x). 'a -> 'a [@@kind foo = bar]
+end = struct
+  let%template id (type a : x) (x : a) : a = x [@@kind foo = bar]
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unknown layout x
+|}]
+
+(* Duplicate jkinds for single kind variable (signature). *)
+module _ : sig
+  val%template id : ('a : x). 'a -> 'a [@@kind x = (value, value)]
+end = struct
+  let id x = x
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template] ("duplicate kinds for single kind variable" (x (value))))
+|}]
+
+(* Duplicate jkinds for single kind variable (structure). *)
+module _ = struct
+  let%template id (type a : x) (x : a) : a = x [@@kind x = (value, value)]
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template] ("duplicate kinds for single kind variable" (x (value))))
+|}]
+
+(* Duplicate jkinds for single kind variable (expression). *)
+let () =
+  let%template id (type a : x) (x : a) : a = x [@@kind x = (value, value)] in
+  ()
+;;
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template] ("duplicate kinds for single kind variable" (x (value))))
+|}]
+
+(* Duplicate jkinds for single kind variable (module declaration). *)
+module type S = sig
+  module%template _ : sig end [@@kind x = (value, value)]
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template] ("duplicate kinds for single kind variable" (x (value))))
+|}]
+
+(* Duplicate jkinds for single kind variable (module expression). *)
+module%template _ = struct end [@@kind x = (value, value)]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template] ("duplicate kinds for single kind variable" (x (value))))
+|}]
+
+(* Duplicate kind variables (signature). *)
+module _ : sig
+  val%template id : ('a : x). 'a -> 'a [@@kind x = value, x = value]
+end = struct
+  let id x = x
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template] ("duplicate kind variables" (x)))
+|}]
+
+(* Duplicate kind variables (structure). *)
+module _ = struct
+  let%template id (type a : x) (x : a) : a = x [@@kind x = value, x = value]
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template] ("duplicate kind variables" (x)))
+|}]
+
+(* Duplicate kind variables (expression). *)
+let () =
+  let%template id (type a : x) (x : a) : a = x [@@kind x = value, x = value] in
+  ()
+;;
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template] ("duplicate kind variables" (x)))
+|}]
+
+(* Duplicate kind variables (module declaration). *)
+module type S = sig
+  module%template _ : sig end [@@kind x = value, x = value]
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template] ("duplicate kind variables" (x)))
+|}]
+
+(* Duplicate kind variables (module expression). *)
+module%template _ = struct end [@@kind x = value, x = value]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template] ("duplicate kind variables" (x)))
+|}]
+
+(* Missing [@kind: l] on recursive call. *)
+module _ : sig
+  val%template apply_n_times : ('a : l). n:int -> ('a -> 'a) -> 'a -> 'a
+  [@@kind l = (value, float64)]
+end = struct
+  let%template rec apply_n_times ~n f x =
+    if n <= 0 then x else apply_n_times ~n:(n - 1) f (f x)
+  [@@kind l = (value, float64)]
+  ;;
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Signature mismatch:
+       ...
+       Values do not match:
+         val apply_n_times__float64 : n:int -> ('a -> 'a) -> 'a -> 'a
+       is not included in
+         val apply_n_times__float64 :
+           ('a : float64). n:int -> ('a -> 'a) -> 'a -> 'a
+       The type n:int -> ('a -> 'a) -> 'a -> 'a
+       is not compatible with the type n:int -> ('b -> 'b) -> 'b -> 'b
+       The layout of 'a is float64
+         because of the definition of apply_n_times__float64 at file "test.mlt", lines 143-144, characters 2-31.
+       But the layout of 'a must be a sublayout of value
+         because of the definition of apply_n_times__float64 at file "test.mlt", lines 146-147, characters 33-58.
+       File "test.mlt", lines 143-144, characters 2-31: Expected declaration
+       File "test.mlt", line 146, characters 19-32: Actual declaration
+|}]
+
+(* Missing [@kind: l] on recursive call (as above, but with a newtype expression). *)
+module _ : sig
+  val%template apply_n_times : ('a : l). n:int -> ('a -> 'a) -> 'a -> 'a
+  [@@kind l = (value, float64)]
+end = struct
+  let%template rec apply_n_times : type (a : l). n:int -> (a -> a) -> a -> a =
+    fun ~n f x -> if n <= 0 then x else apply_n_times ~n:(n - 1) f (f x)
+  [@@kind l = (value, float64)]
+  ;;
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: This expression has type a -> a but an expression was expected of type
+         'a -> 'a
+       The layout of a is float64
+         because of the annotation on the abstract type declaration for a.
+       But the layout of a must be a sublayout of value
+         because of the annotation on the universal variable 'a.
+|}]
+
+(* [@kind] on expression other than an identifier. *)
+module _ = struct
+  let%template apply f x = f x [@kind a b] [@@kind a = bits64, b = bits64]
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [%template]: don't know how to mangle this expression (suffix:
+       bits64__bits64)
+|}]
+
+(* [@kind] on module expression other than an identifier. *)
+[%%template module _ = struct end [@kind bits64]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [%template]: don't know how to mangle this module expression (suffix:
+       bits64)
+|}]
+
+(* Unbound type variables in templates unify across instantiations, which can cause
+   confusing behavior. Update docs if this is ever changed. *)
+[%%template
+  module _ = struct
+    let[@kind k = (value, float64)] f (x : ('a : k)) : 'a = x
+  end]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Bad layout annotation:
+         The layout of 'a is value
+           because of the annotation on the type variable 'a.
+         But the layout of 'a must overlap with float64
+           because of the annotation on the type variable 'a.
+|}]
+
+module type%template Id = sig
+  external id : ('a : k). 'a -> 'a = "%identity" [@@kind k = (value, float64)]
+end
+
+[%%expect {| |}]
+
+module%template Id : Id = struct
+  external id : ('a : k). 'a -> 'a = "%identity" [@@kind k = (value, float64)]
+end
+
+[%%expect {| |}]
+
+(* Demonstrate error message for incorrect [@exclave_if_local] usage. *)
+let%template _ : _ =
+  (let () = () in
+   ()) [@exclave_if_local local]
+;;
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        "exclave_if_local is only allowed on tailcalls or syntactic
+       allocations (e.g. tuples) consisting entirely of identifiers, record
+       fields, and/or constants")
+|}]
+
+(* We rely on the compiler to reject bad [exclave_] placement. *)
+let%template _ : _ =
+  let () = () [@exclave_if_local local] in
+  ()
+;;
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Exclave expression should only be in tail position of the current region.
+|}]
