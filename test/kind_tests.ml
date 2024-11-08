@@ -28,9 +28,9 @@ end
 
 module%test [@name "single kind variable"] _ = struct
   module Id : sig
-    val%template id : 'a. 'a -> 'a [@@kind k = (value, float64)]
+    val%template id : ('a : k). 'a -> 'a [@@kind k = (value, float64)]
   end = struct
-    let%template id (type a) (x : a) : a = x [@@kind k = (value, float64)]
+    let%template id (type a : k) (x : a) : a = x [@@kind k = (value, float64)]
   end
 
   let%test_unit "value" =
@@ -48,10 +48,10 @@ end
 
 module%test [@name "multiple kind variables"] _ = struct
   module Const : sig
-    val%template const : 'a 'b. 'a -> 'b -> 'a
+    val%template const : ('a : a) ('b : b). 'a -> 'b -> 'a
     [@@kind a = (value, float64), b = (value, float64)]
   end = struct
-    let%template const (type a b) (x : a) (_ : b) : a = x
+    let%template const (type (a : a) (b : b)) (x : a) (_ : b) : a = x
     [@@kind a = (value, float64), b = (value, float64)]
     ;;
   end
@@ -84,10 +84,10 @@ end
 
 module%test [@name "recursive"] _ = struct
   module Apply_n_times : sig
-    val%template apply_n_times : 'a. n:int -> ('a -> 'a) -> 'a -> 'a
+    val%template apply_n_times : ('a : k). n:int -> ('a -> 'a) -> 'a -> 'a
     [@@kind k = (value, float64)]
   end = struct
-    let%template rec apply_n_times : type a. n:int -> (a -> a) -> a -> a =
+    let%template rec apply_n_times : type (a : k). n:int -> (a -> a) -> a -> a =
       fun ~n f x -> if n <= 0 then x else (apply_n_times [@kind k]) ~n:(n - 1) f (f x)
     [@@kind k = (value, float64)]
     ;;
@@ -110,13 +110,16 @@ end
 module%test [@name "multiple bindings"] _ = struct
   module Fn : sig
     [%%template:
-    val const : 'a 'b. 'a -> 'b -> 'a [@@kind a = (value, float64), b = (value, float64)]
-    val drop : 'a 'b. 'a -> 'b -> 'b [@@kind a = (value, float64), b = (value, float64)]]
-  end = struct
-    let%template const (type a b) (x : a) (_ : b) : a = x
+    val const : ('a : a) ('b : b). 'a -> 'b -> 'a
     [@@kind a = (value, float64), b = (value, float64)]
 
-    and drop (type a b) (_ : a) (y : b) : b = y
+    val drop : ('a : a) ('b : b). 'a -> 'b -> 'b
+    [@@kind a = (value, float64), b = (value, float64)]]
+  end = struct
+    let%template const (type (a : a) (b : b)) (x : a) (_ : b) : a = x
+    [@@kind a = (value, float64), b = (value, float64)]
+
+    and drop (type (a : a) (b : b)) (_ : a) (y : b) : b = y
     [@@kind a = (value, float64), b = (value, float64)]
     ;;
   end
@@ -189,7 +192,7 @@ end
 
 module%test [@name "expression extension"] _ = struct
   let%test_unit "polymorphic binding + monomorphize" =
-    let%template id (type a) (x : a) = x [@@kind k = (value, float64)] in
+    let%template id (type a : k) (x : a) = x [@@kind k = (value, float64)] in
     Quickcheck.iter [%quickcheck.generator: float] ~f:(fun x ->
       [%test_result: float] ((id [@kind value]) x) ~expect:x;
       [%test_result: float]
@@ -199,7 +202,7 @@ module%test [@name "expression extension"] _ = struct
 
   let%test_unit "just monomorphize" =
     let open struct
-      let%template id (type a) (x : a) = x [@@kind k = (value, float64)]
+      let%template id (type a : k) (x : a) = x [@@kind k = (value, float64)]
     end in
     Quickcheck.iter [%quickcheck.generator: float] ~f:(fun x ->
       (* It is intentional that the first [%template] wraps a [Pexp_apply] while the
@@ -214,11 +217,11 @@ end
 
 module%test [@name "module extensions"] _ = struct
   module Id : [%template:
-  val id : 'a. 'a -> 'a [@@kind k = (value, float64)]
+  val id : ('a : k). 'a -> 'a [@@kind k = (value, float64)]
   val id_b : 'a -> 'a
-  val id_u : 'a. 'a -> 'a] =
+  val id_u : ('a : float64). 'a -> 'a] =
     [%template
-    let id (type a) (x : a) = x [@@kind k = (value, float64)]
+    let id (type a : k) (x : a) = x [@@kind k = (value, float64)]
     let id_b = (id [@kind value])
     let id_u = (id [@kind float64])]
 
@@ -237,14 +240,14 @@ end
 module%test [@name "module bindings"] _ = struct
   module type%template S = sig
     module Id : sig
-      val f : 'a. 'a -> 'a
+      val f : ('a : k). 'a -> 'a
     end
     [@@kind k = (value, float64)]
   end
 
   module%template M : S = struct
     module Id = struct
-      let f (type a) (x : a) = x
+      let f (type a : k) (x : a) = x
     end
     [@@kind k = (value, float64)]
   end
@@ -263,7 +266,7 @@ module%test [@name "module bindings"] _ = struct
 end
 
 module%test [@name "type extension"] _ = struct
-  type%template 'a id = 'a -> 'a [@@kind k = (value, float64)]
+  type%template ('a : k) id = 'a -> 'a [@@kind k = (value, float64)]
 
   let id_b : [%template: ('a id[@kind value])] = fun x -> x
   let id_u : [%template: ('a id[@kind float64])] = fun x -> x
@@ -277,7 +280,7 @@ end
 
 module%test [@name "type declarations"] _ = struct
   module%template M = struct
-    type 'a id = 'a -> 'a [@@kind k = (value, float64)]
+    type ('a : k) id = 'a -> 'a [@@kind k = (value, float64)]
 
     let id_b : ('a id[@kind value]) = fun x -> x
     let id_u : ('a id[@kind float64]) = fun x -> x
@@ -292,16 +295,16 @@ end
 
 module%test [@name "module declarations"] _ = struct
   module type%template S = sig
-    type 'a id = 'a -> 'a
+    type ('a : k) id = 'a -> 'a
 
     val id : 'a id
   end
   [@@kind k = (value, float64)]
 
   module%template M : S [@kind k] = struct
-    type 'a id = 'a -> 'a
+    type ('a : k) id = 'a -> 'a
 
-    let id (type a) (x : a) = x
+    let id (type a : k) (x : a) = x
   end
   [@@kind k = (value, float64)]
 
@@ -316,8 +319,8 @@ end
 
 module%test [@name "check that we can refer to identifiers we've previously bound"] _ =
 struct
-  let%template apply2 (type a b) f (x : a) (y : b) =
-    let apply1 (type c) f (z : c) = f z [@@kind baz = (foo, bar)] in
+  let%template apply2 (type (a : foo) (b : bar)) f (x : a) (y : b) =
+    let apply1 (type c : baz) f (z : c) = f z [@@kind baz = (foo, bar)] in
     (apply1 [@kind bar]) ((apply1 [@kind foo]) f x) y
   [@@kind foo = (value, float64), bar = (bits32, bits64)]
   ;;

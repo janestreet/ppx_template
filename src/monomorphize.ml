@@ -69,7 +69,12 @@ let consume_poly (type a) (attr_ctx : a Attributes.Context.poly) nodes =
       let instances = instantiate ~kinds ~modes in
       let kinds = Bindings.vars kinds in
       let modes = Bindings.vars modes in
-      [ Ok (List.map instances ~f:(fun env -> node, env, kinds, modes)) ])
+      [ Ok
+          (List.map instances ~f:(fun env ->
+             let kinds = List.map ~f:(Env.find_kind_exn env) kinds in
+             let modes = List.map ~f:(Env.find_mode_exn env) modes in
+             node, env, kinds, modes))
+      ])
   |> Result.combine_errors
   |> function
   | Ok instances -> Ok (List.concat instances)
@@ -108,22 +113,23 @@ let error_to_string_hum ~loc err =
 
 let t =
   object (self)
-    inherit [Context.t] Ast_traverse.map_with_context as super
+    inherit [Context.t] Ppxlib_jane.Ast_traverse.map_with_context as super
     method! location ctx loc = { loc with loc_ghost = loc.loc_ghost || ctx.ghostify }
 
-    method! const_jkind ctx jkind =
-      let { txt; loc } = (jkind :> string loc) in
-      Jane_syntax.Jkind.Const.mk
-        (txt
-         |> Identifier.Kind.of_string
-         |> Env.find_kind ctx.env
-         |> Identifier.Kind.to_string)
-        (self#location ctx loc)
+    method! jkind_annotation ctx ({ pjkind_desc; pjkind_loc } as jkind) =
+      match pjkind_desc with
+      | Abbreviation kind ->
+        (match Env.find_kind ctx.env (Identifier.Kind.of_string kind) with
+         | None -> super#jkind_annotation ctx jkind
+         | Some kind -> Binding.Kind.to_node ~loc:pjkind_loc kind)
+      | _ -> super#jkind_annotation ctx jkind
 
-    method! mode ctx (Mode mode) =
-      Mode
-        (Identifier.Mode.to_string
-           (Env.find_mode ctx.env (Identifier.Mode.of_string mode)))
+    method! modes ctx modes =
+      List.map modes ~f:(fun { txt = Mode mode; loc } ->
+        let loc = self#location ctx loc in
+        match Env.find_mode ctx.env (Identifier.Mode.of_string mode) with
+        | None -> { txt = Mode mode; loc }
+        | Some mode -> { txt = Binding.Mode.to_node ~loc mode; loc })
 
     (* The [@kind] attribute can appear on various identifier nodes that reference values,
        modules,or types that were defined using [@kind]. For each node that could be such
@@ -175,17 +181,19 @@ let t =
               is_ident_or_field_or_constant expr
             | _ -> false
           in
-          let rec is_pure_allocation = function
-            | { pexp_desc = Pexp_tuple exprs; _ } ->
-              List.for_all ~f:is_pure_allocation exprs
-            | { pexp_desc = Pexp_construct (_, expr) | Pexp_variant (_, expr); _ } ->
+          let rec is_pure_allocation ({ pexp_desc; pexp_loc; _ } as expr) =
+            match
+              Ppxlib_jane.Shim.Expression_desc.of_parsetree pexp_desc ~loc:pexp_loc
+            with
+            | Pexp_tuple labeled_exprs ->
+              List.for_all ~f:(fun (_, expr) -> is_pure_allocation expr) labeled_exprs
+            | Pexp_construct (_, expr) | Pexp_variant (_, expr) ->
               Option.for_all ~f:is_pure_allocation expr
-            | { pexp_desc = Pexp_record (fields, expr); _ } ->
+            | Pexp_record (fields, expr) ->
               List.for_all ~f:(snd >> is_pure_allocation) fields
               && Option.for_all ~f:is_pure_allocation expr
-            | { pexp_desc = Pexp_array exprs; _ } ->
-              List.for_all ~f:is_pure_allocation exprs
-            | expr -> is_ident_or_field_or_constant expr
+            | Pexp_array (_mut, exprs) -> List.for_all ~f:is_pure_allocation exprs
+            | _ -> is_ident_or_field_or_constant expr
           in
           let is_allowable =
             match expr.pexp_desc with
@@ -199,8 +207,8 @@ let t =
           then
             if Identifier.Mode.equal
                  (Identifier.Mode.of_string "local")
-                 (Env.find_mode ctx.env mode)
-            then [%expr [%e expr]]
+                 (Env.find_mode ctx.env mode |> Option.value ~default:mode)
+            then [%expr exclave_ [%e expr]]
             else expr
           else
             (* Ideally this check is conservative, which seems fine for now. *)
@@ -260,8 +268,9 @@ let t =
 
     method
       private visit_floating_poly
-      : type a. a Attributes.Floating.Context.poly -> Context.t -> a list -> a list =
-      fun attr_ctx ->
+      : type a.  a Attributes.Floating.Context.poly
+                -> local_ (Context.t -> a list -> a list) =
+      fun attr_ctx -> exclave_
         let ( (visit : Context.t -> a -> a)
             , (on_error : loc:location -> extension -> attributes -> a) )
           =
@@ -269,7 +278,7 @@ let t =
           | Structure_item -> self#structure_item, Ast_builder.pstr_extension
           | Signature_item -> self#signature_item, Ast_builder.psig_extension
         in
-        let[@tail_mod_cons] rec loop ~k ctx : a list -> a list = function
+        let[@tail_mod_cons] rec local_ loop ~k ctx : a list -> a list = function
           | [] -> continue k
           | item :: items ->
             (* [Ppxlib] complains if we give it something besides an attribute. *)
@@ -312,14 +321,14 @@ let t =
                 | Error (loc, err) ->
                   on_error ~loc (error_to_string_hum ~loc err) [] :: loop ~k ctx items)
              | _ -> visit ctx item :: loop ~k ctx items)
-        and[@tail_mod_cons] continue = function
+        and[@tail_mod_cons] local_ continue = function
           | [] -> []
           | (ctx, items) :: k -> loop ~k ctx items
         in
         loop ~k:[]
 
     method! structure ctx items = self#visit_floating_poly Structure_item ctx items
-    method! signature ctx items = self#visit_floating_poly Signature_item ctx items
+    method! signature_items ctx items = self#visit_floating_poly Signature_item ctx items
 
     method! expression_desc =
       let on_error err _ = Pexp_extension err in

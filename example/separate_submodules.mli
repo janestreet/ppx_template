@@ -4,7 +4,7 @@ open Each_binding
 
 (* $MDX part-begin=arity1 *)
 module type S1 = sig
-  type t
+  type t : any
 
   val round_up : t -> t
   val round_down : t -> t
@@ -12,12 +12,12 @@ module type S1 = sig
   val iround_down_exn : t -> int
 end
 
-type 'a module1 = (module S1 with type t = 'a)
+type ('a : any) module1 = (module S1 with type t = 'a)
 
-val round_up1 : 'a. 'a module1 -> 'a -> 'a
-val round_down1 : 'a. 'a module1 -> 'a -> 'a
-val iround_up1_exn : 'a. 'a module1 -> 'a -> int
-val iround_down1_exn : 'a. 'a module1 -> 'a -> int
+val round_up1 : ('a : any). 'a module1 -> 'a -> 'a
+val round_down1 : ('a : any). 'a module1 -> 'a -> 'a
+val iround_up1_exn : ('a : any). 'a module1 -> 'a -> int
+val iround_down1_exn : ('a : any). 'a module1 -> 'a -> int
 (* $MDX part-end *)
 
 (* $MDX part-begin=arity0 *)
@@ -25,7 +25,7 @@ val iround_down1_exn : 'a. 'a module1 -> 'a -> int
 [@@@kind k = (value, float64)]
 
 module type [@kind k] S0 = sig
-  type t
+  type t : k
 
   include S1 with type t := t
 end

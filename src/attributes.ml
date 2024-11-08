@@ -8,46 +8,57 @@ let ident (type a cmp) ((module Id) : (a, cmp) Identifier.t) =
   Ast_pattern.(pexp_ident (map1 (lident __) ~f:Id.of_string))
 ;;
 
-let many_or_one a b = Ast_pattern.(a ||| map1 b ~f:List.return)
-let tuple_or_one p = many_or_one Ast_pattern.(pexp_tuple (many p)) p
+let one_or_many a b = Ast_pattern.(map1 a ~f:List.return ||| b)
+let tuple_or_one p = one_or_many p Ast_pattern.(pexp_tuple (many p))
 
-(* Parses an [expression] of the form [a b c] (i.e. function application of identifiers)
+(* Parses an [expression] of the form [a b c] (i.e. function application of bindings)
    as [[ "a"; "b"; "c" ]]. *)
-let ident_apply_pattern id =
-  Ast_pattern.(
-    many_or_one
-      (map2 (pexp_apply (ident id) (many (pair nolabel (ident id)))) ~f:List.cons)
-      (ident id))
+let binding_apply_pattern (type a id node) ((module Binding) : (a, id, node) Binding.t) =
+  let open Ast_pattern in
+  one_or_many
+    (Binding.pattern ())
+    (map2
+       (pexp_apply (Binding.pattern ()) (many (pair nolabel (Binding.pattern ()))))
+       ~f:List.cons)
 ;;
 
-(* Parses an [expression] of the form [a, b, c] (i.e. a tuple of identifiers) as
+(* Parses an [expression] of the form [a, b, c] (i.e. a tuple of bindings) as
    [[ "a"; "b"; "c" ]]. *)
-let ident_tuple_pattern id = ident id |> tuple_or_one
+let binding_tuple_pattern (type a id node) ((module Binding) : (a, id, node) Binding.t) =
+  tuple_or_one (Binding.pattern ())
+;;
 
 (* Parses an [expression] of the form [l = (a, b)] as ["l", [ "a"; "b" ]]. *)
-let ident_equals_pattern id =
-  Ast_pattern.(
-    pexp_apply
-      (pexp_ident (lident (string "=")))
-      (pair nolabel (ident id) ^:: pair nolabel (ident_tuple_pattern id) ^:: nil)
-    |> pack2)
+let ident_equals_pattern id binding =
+  let open Ast_pattern in
+  pexp_apply
+    (pexp_ident (lident (string "=")))
+    (pair nolabel (ident id) ^:: pair nolabel (binding_tuple_pattern binding) ^:: nil)
+  |> pack2
 ;;
 
 (* Parses a [payload] of the form [l = (a, b), m = (c, d)] as
    [[ "l", [ "a"; "b" ]; "m", [ "c"; "d" ] ]], or of the form [a b] as
    [[ "a", [ "a" ]; "b", [ "b" ]]]. *)
-let ident_poly_pattern id =
-  Ast_pattern.(
-    tuple_or_one (ident_equals_pattern id)
-    ||| map1 (ident_apply_pattern id) ~f:(List.map ~f:(fun jkind -> jkind, [ jkind ]))
-    |> at_most_one_eval)
+let binding_poly_pattern
+  (type id cmp binding node)
+  (id : (id, cmp) Identifier.t)
+  ((module Binding) as binding : (binding, id, node) Binding.t)
+  =
+  let open Ast_pattern in
+  tuple_or_one (ident_equals_pattern id binding)
+  ||| map1
+        (binding_apply_pattern binding)
+        ~f:
+          (List.map ~f:(fun binding -> Binding.to_mangled_identifier binding, [ binding ]))
+  |> at_most_one_eval
 ;;
 
 (* Parses a [payload] of the form [a b c] as [[ "a"; "b"; "c" ]]. *)
-let ident_mono_pattern id = ident_apply_pattern id |> at_most_one_eval
+let binding_mono_pattern binding = binding_apply_pattern binding |> at_most_one_eval
 
 module type Context = sig
-  type ('a, 'w) t [@@immediate]
+  type ('a, 'w) t : immediate
 end
 
 module type Attribute = sig
@@ -90,7 +101,9 @@ struct
   let declare ~name ~contexts ~pattern ~k =
     Map.Poly.of_iteri_exn ~iteri:(fun ~f ->
       List.iter contexts ~f:(fun (T context as key : _ Packed(Context).t) ->
-        let attribute = Attribute.declare name (Context.to_ppxlib context) pattern k in
+        let attribute =
+          Attribute.declare ("template." ^ name) (Context.to_ppxlib context) pattern k
+        in
         f ~key ~data:(T (context, attribute) : _ With_attribute(Context)(Attribute).t)) [@nontail
                                                                                           ])
   ;;
@@ -288,7 +301,12 @@ let consume t ctx ast = Attribute.consume (find_exn t ctx) ast
 let get t ctx ast = Attribute.get (find_exn t ctx) ~mark_as_seen:false ast
 let has t ctx ast = Option.is_some (get t ctx ast)
 
-let declare_poly (type a cmp) (id : (a, cmp) Identifier.t) ~name =
+let declare_poly
+  (type id cmp binding node)
+  (id : (id, cmp) Identifier.t)
+  (binding : (binding, id, node) Binding.t)
+  ~name
+  =
   declare
     ~name
     ~contexts:
@@ -300,23 +318,23 @@ let declare_poly (type a cmp) (id : (a, cmp) Identifier.t) ~name =
       ; T Module_type_declaration
       ; T Include_infos
       ]
-    ~pattern:(ident_poly_pattern (module (val id)))
-    ~k:(Bindings.create id)
+    ~pattern:(binding_poly_pattern id binding)
+    ~k:(Bindings.create id binding)
 ;;
 
-let kind_poly = declare_poly Identifier.kind ~name:"kind"
-let mode_poly = declare_poly Identifier.mode ~name:"mode"
+let kind_poly = declare_poly Identifier.kind Binding.kind ~name:"kind"
+let mode_poly = declare_poly Identifier.mode Binding.mode ~name:"mode"
 
-let declare_mono (type a cmp) (id : (a, cmp) Identifier.t) ~name =
+let declare_mono (type binding id node) (binding : (binding, id, node) Binding.t) ~name =
   declare
     ~name
     ~contexts:[ T Expression; T Module_expr; T Core_type; T Module_type ]
-    ~pattern:(ident_mono_pattern (module (val id)))
+    ~pattern:(binding_mono_pattern binding)
     ~k:Fn.id
 ;;
 
-let kind_mono = declare_mono Identifier.kind ~name:"kind"
-let mode_mono = declare_mono Identifier.mode ~name:"mode"
+let kind_mono = declare_mono Binding.kind ~name:"kind"
+let mode_mono = declare_mono Binding.mode ~name:"mode"
 
 let exclave_if_local =
   declare
@@ -351,14 +369,19 @@ module Floating = struct
 
   let convert t ctx ast = Attribute.Floating.convert [ find_exn t ctx ] ast
 
-  let declare_poly (type a cmp) (id : (a, cmp) Identifier.t) ~name =
+  let declare_poly
+    (type id cmp binding node)
+    (id : (id, cmp) Identifier.t)
+    (binding : (binding, id, node) Binding.t)
+    ~name
+    =
     declare
       ~name
       ~contexts:[ T Structure_item; T Signature_item ]
-      ~pattern:(ident_poly_pattern (module (val id)))
-      ~k:(Bindings.create id)
+      ~pattern:(binding_poly_pattern id binding)
+      ~k:(Bindings.create id binding)
   ;;
 
-  let kind_poly = declare_poly Identifier.kind ~name:"kind"
-  let mode_poly = declare_poly Identifier.mode ~name:"mode"
+  let kind_poly = declare_poly Identifier.kind Binding.kind ~name:"kind"
+  let mode_poly = declare_poly Identifier.mode Binding.mode ~name:"mode"
 end

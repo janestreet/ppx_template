@@ -36,7 +36,7 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate kinds for single kind variable" (x (value))))
+Error: ([%template] ("duplicate bindings for single identifier" (x (value))))
 |}]
 
 (* Duplicate jkinds for single kind variable (structure). *)
@@ -47,7 +47,7 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate kinds for single kind variable" (x (value))))
+Error: ([%template] ("duplicate bindings for single identifier" (x (value))))
 |}]
 
 (* Duplicate jkinds for single kind variable (expression). *)
@@ -59,7 +59,7 @@ let () =
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate kinds for single kind variable" (x (value))))
+Error: ([%template] ("duplicate bindings for single identifier" (x (value))))
 |}]
 
 (* Duplicate jkinds for single kind variable (module declaration). *)
@@ -70,7 +70,7 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate kinds for single kind variable" (x (value))))
+Error: ([%template] ("duplicate bindings for single identifier" (x (value))))
 |}]
 
 (* Duplicate jkinds for single kind variable (module expression). *)
@@ -79,7 +79,7 @@ module%template _ = struct end [@@kind x = (value, value)]
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate kinds for single kind variable" (x (value))))
+Error: ([%template] ("duplicate bindings for single identifier" (x (value))))
 |}]
 
 (* Duplicate kind variables (signature). *)
@@ -92,7 +92,7 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate kind variables" (x)))
+Error: ([%template] ("duplicate identifiers" (x)))
 |}]
 
 (* Duplicate kind variables (structure). *)
@@ -103,7 +103,7 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate kind variables" (x)))
+Error: ([%template] ("duplicate identifiers" (x)))
 |}]
 
 (* Duplicate kind variables (expression). *)
@@ -115,7 +115,7 @@ let () =
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate kind variables" (x)))
+Error: ([%template] ("duplicate identifiers" (x)))
 |}]
 
 (* Duplicate kind variables (module declaration). *)
@@ -126,7 +126,7 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate kind variables" (x)))
+Error: ([%template] ("duplicate identifiers" (x)))
 |}]
 
 (* Duplicate kind variables (module expression). *)
@@ -135,7 +135,7 @@ module%template _ = struct end [@@kind x = value, x = value]
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate kind variables" (x)))
+Error: ([%template] ("duplicate identifiers" (x)))
 |}]
 
 (* Missing [@kind: l] on recursive call. *)
@@ -223,11 +223,11 @@ Error: [%template]: don't know how to mangle this module expression (suffix:
 [%%expect
   {|
 Line _, characters _-_:
-Error: Bad layout annotation:
-         The layout of 'a is value
-           because of the annotation on the type variable 'a.
-         But the layout of 'a must overlap with float64
-           because of the annotation on the type variable 'a.
+Error: This type ('a : float64) should be an instance of type ('a0 : value)
+       The layout of 'a is value
+         because of the annotation on the type variable 'a.
+       But the layout of 'a must overlap with float64
+         because of the annotation on the type variable 'a.
 |}]
 
 module type%template Id = sig
@@ -241,6 +241,20 @@ module%template Id : Id = struct
 end
 
 [%%expect {| |}]
+
+(* Representation of product kinds in error messages. *)
+module _ : sig
+  val%template id : ('a : x). 'a -> 'a [@@kind x = (value & bits32, value & bits32)]
+end = struct
+  let id x = x
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("duplicate bindings for single identifier" (x ('value_bits32'))))
+|}]
 
 (* Demonstrate error message for incorrect [@exclave_if_local] usage. *)
 let%template _ : _ =
@@ -267,4 +281,28 @@ let%template _ : _ =
   {|
 Line _, characters _-_:
 Error: Exclave expression should only be in tail position of the current region.
+|}]
+
+let%template[@kind Foo] _ : _ = ()
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: apply expected
+|}]
+
+let%template[@kind foo = Bar] _ : _ = ()
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: expected a kind abbreviation or product kind
+|}]
+
+let%template _ : _ = () [@kind Foo]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: expected a kind abbreviation or product kind
 |}]

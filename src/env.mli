@@ -13,21 +13,23 @@ open! Import
 type t
 
 val create
-  :  kinds:Bindings.Instance.M(Identifier.Kind).t
-  -> modes:Bindings.Instance.M(Identifier.Mode).t
+  :  kinds:Bindings.Instance.M(Identifier.Kind)(Binding.Kind).t
+  -> modes:Bindings.Instance.M(Identifier.Mode)(Binding.Mode).t
   -> t
 
 val empty : t
 
-type 'a find := t -> 'a -> 'a
+type ('id, 'binding) find := t -> 'id -> 'binding option
+type ('id, 'binding) find_exn := t -> 'id -> 'binding
 
-(** Look up the current binding for this kind variable. If there is no such binding,
-    assume the [Kind.t] is a constant and return it unaltered. We rely on the compiler to
-    complain if it is an unrecognized kind, rather than check ourselves. *)
-val find_kind : Identifier.Kind.t find
+(** Look up the current binding for this identifier. *)
+val find_kind : (Identifier.Kind.t, Binding.Kind.t) find
 
 (** As [find_kind], but for modes. *)
-val find_mode : Identifier.Mode.t find
+val find_mode : (Identifier.Mode.t, Binding.Mode.t) find
+
+val find_kind_exn : (Identifier.Kind.t, Binding.Kind.t) find_exn
+val find_mode_exn : (Identifier.Mode.t, Binding.Mode.t) find_exn
 
 (** [lookup_and_set_all ~current_env ~uninterpreted_env] looks up any kinds or modes in
     [uninterpreted_env] bound in [current_env], and then merges the two environments,

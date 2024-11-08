@@ -1,6 +1,6 @@
 open! Base
 open! Import
-include Identifier_intf
+include Identifier_intf.Definitions
 
 let make ~default =
   (module struct

@@ -39,10 +39,10 @@ end
 
 type ('w, 'b) t
 
-val kind_poly : (poly, Bindings.M(Identifier.Kind).t Or_error.t) t
-val mode_poly : (poly, Bindings.M(Identifier.Mode).t Or_error.t) t
-val kind_mono : (mono, Identifier.Kind.t list) t
-val mode_mono : (mono, Identifier.Mode.t list) t
+val kind_poly : (poly, Bindings.M(Identifier.Kind)(Binding.Kind).t Or_error.t) t
+val mode_poly : (poly, Bindings.M(Identifier.Mode)(Binding.Mode).t Or_error.t) t
+val kind_mono : (mono, Binding.Kind.t list) t
+val mode_mono : (mono, Binding.Mode.t list) t
 val exclave_if_local : ([ `expression ], Identifier.Mode.t) t
 val consume : ('w, 'b) t -> ('a, 'w) Context.t -> 'a -> ('a * 'b) option
 val get : ('w, 'b) t -> ('a, 'w) Context.t -> 'a -> 'b option
@@ -64,7 +64,7 @@ module Floating : sig
 
   type ('w, 'b) t
 
-  val kind_poly : (poly, Bindings.M(Identifier.Kind).t Or_error.t) t
-  val mode_poly : (poly, Bindings.M(Identifier.Mode).t Or_error.t) t
+  val kind_poly : (poly, Bindings.M(Identifier.Kind)(Binding.Kind).t Or_error.t) t
+  val mode_poly : (poly, Bindings.M(Identifier.Mode)(Binding.Mode).t Or_error.t) t
   val convert : ('w, 'b) t -> ('a, 'w) Context.t -> 'a -> 'b option
 end

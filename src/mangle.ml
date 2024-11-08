@@ -9,9 +9,19 @@ module Suffix = struct
   (* This code using [env] to map jkinds needs to live somewhere, and be called every time
      we go to mangle an identifier. Here seems like as reasonable a place as any. *)
   let create ~env ~kinds ~modes =
-    let kinds = List.map ~f:(Env.find_kind env) kinds in
-    let modes = List.map ~f:(Env.find_mode env) modes in
-    let txt (type a cmp) ((module Id) : (a, cmp) Identifier.t) ids =
+    let resolve
+      (type binding id node)
+      ((module Binding) : (binding, id, node) Binding.t)
+      bindings
+      ~find
+      =
+      List.map
+        bindings
+        ~f:(Binding.resolve ~find_identifier:(find env) >> Binding.to_mangled_identifier)
+    in
+    let kinds = resolve Binding.kind kinds ~find:Env.find_kind in
+    let modes = resolve Binding.mode modes ~find:Env.find_mode in
+    let txt (type id cmp) ((module Id) : (id, cmp) Identifier.t) ids =
       if List.for_all ids ~f:(Id.equal Id.default)
       then []
       else List.map ~f:Id.to_string ids

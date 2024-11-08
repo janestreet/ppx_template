@@ -5,7 +5,7 @@ open! Import
 [%%template:
 [@@@kind k = (value, float64)]
 
-type float [@@kind k]
+type float : k [@@kind k]
 
 val round_up : (float[@kind k]) -> (float[@kind k]) [@@kind k]
 val round_down : (float[@kind k]) -> (float[@kind k]) [@@kind k]

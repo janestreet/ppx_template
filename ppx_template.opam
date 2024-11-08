@@ -12,10 +12,9 @@ build: [
 depends: [
   "ocaml" {>= "5.1.0"}
   "base"
-  "core_kernel"
   "ppxlib_jane"
   "dune"        {>= "3.11.0"}
-  "ppxlib"      {>= "0.33.0"}
+  "ppxlib"      {= "0.33.0+jst"}
 ]
 available: arch != "arm32" & arch != "x86_32"
 synopsis: "C++-style templates for kind and mode polymorphism"

@@ -9,7 +9,7 @@ end
 
 (* $MDX part-begin=arity1 *)
 module type S1 = sig
-  type t
+  type t : any
 
   val round_up : t -> t
   val round_down : t -> t
@@ -17,12 +17,12 @@ module type S1 = sig
   val iround_down_exn : t -> int
 end
 
-type 'a module1 = (module S1 with type t = 'a)
+type ('a : any) module1 = (module S1 with type t = 'a)
 
-let round_up1 (type a) ((module M) : a module1) = M.round_up
-let round_down1 (type a) ((module M) : a module1) = M.round_down
-let iround_up1_exn (type a) ((module M) : a module1) = M.iround_up_exn
-let iround_down1_exn (type a) ((module M) : a module1) = M.iround_down_exn
+let round_up1 (type a : any) ((module M) : a module1) = M.round_up
+let round_down1 (type a : any) ((module M) : a module1) = M.round_down
+let iround_up1_exn (type a : any) ((module M) : a module1) = M.iround_up_exn
+let iround_down1_exn (type a : any) ((module M) : a module1) = M.iround_down_exn
 (* $MDX part-end *)
 
 (* $MDX part-begin=arity0 *)
@@ -30,7 +30,7 @@ let iround_down1_exn (type a) ((module M) : a module1) = M.iround_down_exn
 [@@@kind k = (value, float64)]
 
 module type [@kind k] S0 = sig
-  type t
+  type t : k
 
   include S1 with type t := t
 end

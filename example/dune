@@ -2,4 +2,4 @@
  (name ppx_template_example)
  (libraries core float_u)
  (preprocess
-  (pps ppx_jane ppx_template)))
+  (pps ppx_jane)))

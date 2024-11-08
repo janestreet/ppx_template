@@ -12,7 +12,7 @@ open
 
 (* $MDX part-begin=custom-intf *)
 module%template [@kind k = (value, float64)] Float : sig
-  type t
+  type t : k
 
   val round_up : t -> t
   val round_down : t -> t
