@@ -21,10 +21,13 @@ let signature =
     Signature_item
     Ast_pattern.(psig __)
     (fun ~loc ~path:(_ : string) sigis ->
-      match Monomorphize.t#signature Monomorphize.Context.top sigis with
+      let sigis = Monomorphize.t#signature Monomorphize.Context.top sigis in
+      let open Ppxlib_jane.Shim.Signature in
+      let { psg_items; _ } = of_parsetree sigis in
+      match psg_items with
       | [ sigi ] -> sigi
-      | sigis ->
-        let mod_ = Ast_builder.pmty_signature ~loc sigis in
+      | _ ->
+        let mod_ = Ppxlib_jane.Ast_builder.Default.pmty_signature ~loc sigis in
         let loc = { loc with loc_ghost = true } in
         [%sigi: include [%m mod_]])
 ;;
@@ -55,7 +58,7 @@ let module_type =
     Module_type
     Ast_pattern.(psig __)
     (fun ~loc ~path:(_ : string) sigis ->
-      Ast_builder.pmty_signature
+      Ppxlib_jane.Ast_builder.Default.pmty_signature
         ~loc:{ loc with loc_ghost = true }
         (Monomorphize.t#signature Monomorphize.Context.top sigis))
 ;;

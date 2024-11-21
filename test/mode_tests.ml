@@ -11,9 +11,9 @@ open! Core
 module%template Comparable : sig
   [@@@mode m = (global, local)]
 
-  type ('a, 'b) compare_fn := 'a @ m -> 'a @ m -> 'b [@@mode m]
-  type ('a, 'b) fn := 'a @ m -> 'b @ m [@@mode m]
-  type 'a select_fn := 'a @ m -> 'a @ m -> 'a @ m [@@mode m]
+  type ('a, 'b) compare_fn := 'a -> 'a -> 'b [@@mode m]
+  type ('a, 'b) fn := 'a -> 'b [@@mode m]
+  type 'a select_fn := 'a -> 'a -> 'a [@@mode m]
 
   val lexicographic
     :  (('a, int) compare_fn[@mode m]) list
@@ -77,14 +77,14 @@ end
 module%template T : sig
   type t
 
-  val compare : t @ m -> t @ m -> int [@@mode m = (global, local)]
+  val compare : t -> t -> int [@@mode m = (global, local)]
   val of_char : char -> t
-  val sexp_of_t : t @ local -> Sexp.t
+  val sexp_of_t : t -> Sexp.t
 end = struct
   include Char
 
   let of_char t = t
-  let sexp_of_t = (sexp_of_t :> t @ local -> _)
+  let sexp_of_t = (sexp_of_t :> t -> _)
 end
 
 let x = T.of_char 'x'

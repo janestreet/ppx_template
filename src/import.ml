@@ -23,7 +23,9 @@ end
 include struct
   open Ppxlib_jane
   module Ast_traverse = Ast_traverse
-  module Jane_syntax = Jane_syntax
+
+  type jkind_annotation = Shim.jkind_annotation
+  type mode = Shim.Mode.t = Mode of string [@@unboxed]
 end
 
 include Composition_infix
