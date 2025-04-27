@@ -1,40 +1,43 @@
-open! Base
+open! Stdppx
 open! Import
 
 (** Represents the identifier variables introduced by a single binding, along with the set
     of bindings over which they range. Conceptually this is something like a
     [Set.M(Binding).t Map.M(Identifier).t], but stored as lists because the order matters
     for name mangling. *)
-type ('id, 'binding, 'cmp) t
+type ('id, 'binding) t
 
 module M
     (Identifier : Identifier.S)
     (Binding : Binding.S with type identifier := Identifier.t) : sig
-  type nonrec t = (Identifier.t, Binding.t, Identifier.comparator_witness) t
+  type nonrec t = (Identifier.t, Binding.t) t
 end
 
 (** Returns an error if there are any duplicate mappings. *)
 val create
-  :  ('id, 'cmp) Identifier.t
+  :  'id Identifier.t
   -> ('binding, 'id, _) Binding.t
-  -> ('id, 'binding list) List.Assoc.t
-  -> ('id, 'binding, 'cmp) t Or_error.t
+  -> ('id * 'binding list) list
+  -> (('id, 'binding) t, Sexp.t) result
 
 (** [empty] is equivalent to [create [] |> ok_exn]. *)
-val empty : ('a, 'cmp) Identifier.t -> ('a, _, 'cmp) t
+val empty : 'id Identifier.t -> ('binding, 'id, _) Binding.t -> ('id, 'binding) t
 
 (** Returns the keys of the association list passed to to [create]. *)
-val vars : ('a, _, _) t -> 'a list
+val vars : ('a, _) t -> 'a list
 
 module Instance : sig
-  type ('id, 'binding, 'cmp) t = ('id, 'binding, 'cmp) Map.t
+  type ('id, 'binding) t = ('id, 'binding) Identifier.map
 
   module M
       (Identifier : Identifier.S)
       (Binding : Binding.S with type identifier := Identifier.t) : sig
-    type nonrec t = (Identifier.t, Binding.t, Identifier.comparator_witness) t
+    type nonrec t = (Identifier.t, Binding.t) t
   end
 end
 
 (** Enumerate all instances. *)
-val instantiate : ('id, 'binding, 'cmp) t -> ('id, 'binding, 'cmp) Instance.t list
+val instantiate
+  :  ('id, 'binding) t
+  -> find_identifier:('id -> 'binding option)
+  -> ('id, 'binding) Instance.t list

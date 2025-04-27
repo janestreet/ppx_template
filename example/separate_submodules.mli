@@ -22,26 +22,26 @@ val iround_down1_exn : ('a : any). 'a module1 -> 'a -> int
 
 (* $MDX part-begin=arity0 *)
 [%%template:
-[@@@kind k = (value, float64)]
+[@@@kind.default k = (value, float64)]
 
-module type [@kind k] S0 = sig
+module type S0 = sig
   type t : k
 
   include S1 with type t := t
 end
 
-module [@kind k] M : S0 [@kind k] with type t = (float[@kind k])]
+module M : S0 [@kind k] with type t = (float[@kind k])]
 (* $MDX part-end *)
 
 (* $MDX part-begin=arity0-of-arity1 *)
 [%%template:
-[@@@kind k = (value, float64)]
+[@@@kind.default k = (value, float64)]
 
-type module0 = ((module S0 with type t = (float[@kind k]))[@kind k]) [@@kind k]
+type module0 = ((module S0 with type t = (float[@kind k]))[@kind k])
 
-val module0 : (module0[@kind k]) [@@kind k]
-val round_up0 : (float[@kind k]) -> (float[@kind k]) [@@kind k]
-val round_down0 : (float[@kind k]) -> (float[@kind k]) [@@kind k]
-val iround_up0_exn : (float[@kind k]) -> int [@@kind k]
-val iround_down0_exn : (float[@kind k]) -> int [@@kind k]]
+val module0 : (module0[@kind k])
+val round_up0 : (float[@kind k]) -> (float[@kind k])
+val round_down0 : (float[@kind k]) -> (float[@kind k])
+val iround_up0_exn : (float[@kind k]) -> int
+val iround_down0_exn : (float[@kind k]) -> int]
 (* $MDX part-end *)

@@ -82,6 +82,92 @@ module%test [@name "multiple kind variables"] _ = struct
   ;;
 end
 
+module%test [@name "kinds with mod"] _ = struct
+  [%%template
+  [@@@kind k = (value, value mod portable, value mod contended)]
+
+  type pos : k [@@kind k]
+  type ('a : k) neg [@@kind k]
+  type _t = ((pos[@kind k]) neg[@kind k]) [@@kind k]]
+
+  [%%template
+  (* [_ neg[@kind value]] accepts types at any mode crossing behavior *)
+  type _t_value = ((pos[@kind k]) neg[@kind value])
+  [@@kind k = (value, value mod portable, value mod contended)]
+
+  (* ['a neg[@kind value mod portable]] guarantees ['a] mode cross portability *)
+  let _f_portable
+    : 'a @ nonportable -> ('a neg[@kind value mod portable]) -> 'a @ portable
+    =
+    fun x _y -> x
+  ;;
+
+  (* ['a neg[@kind value mod contended]] guarantees ['a] mode cross contention *)
+  let _f_uncontended
+    : 'a @ contended -> ('a neg[@kind value mod contended]) -> 'a @ contended
+    =
+    fun x _y -> x
+  ;;]
+end
+
+module%test [@name "product kinds with mod"] _ = struct
+  [%%template
+  [@@@kind
+    k
+    = ( value & value
+      , (value mod contended) & (value mod contended)
+      , (value & value) mod portable )]
+
+  type pos : k [@@kind k]
+  type ('a : k) neg [@@kind k]
+  type _t = ((pos[@kind k]) neg[@kind k]) [@@kind k]]
+
+  [%%template
+  (* [_ neg[@kind value & value]] accepts types at any mode crossing behavior *)
+  type _t_value = ((pos[@kind k]) neg[@kind value & value])
+  [@@kind
+    k
+    = ( value & value
+      , (value mod contended) & (value mod contended)
+      , (value & value) mod portable )]
+
+  (* ['a neg[@kind value mod portable]] guarantees ['a] mode cross portability *)
+  let _f_portable
+    : 'a @ nonportable -> ('a neg[@kind (value & value) mod portable]) -> 'a @ portable
+    =
+    fun x _y -> x
+  ;;
+
+  (* ['a neg[@kind value mod contended]] guarantees ['a] mode cross contention *)
+  let _f_uncontended
+    :  'a @ contended -> ('a neg[@kind (value mod contended) & (value mod contended)])
+    -> 'a @ uncontended
+    =
+    fun x _y -> x
+  ;;]
+end
+
+module%test [@name "kinds with multiple mods mangle independent of order"] _ = struct
+  module%template [@kind k = value mod contended portable] M = struct
+    type t : k
+  end
+
+  module Require_same
+      (A : sig
+         type t : any
+       end)
+      (_ : sig
+         type t : any = A.t [@@warning "-34"]
+       end) =
+  struct end
+
+  module%template _ =
+    Require_same
+      (M
+      [@kind value mod contended portable])
+      (M [@kind value mod portable contended])
+end
+
 module%test [@name "recursive"] _ = struct
   module Apply_n_times : sig
     val%template apply_n_times : ('a : k). n:int -> ('a -> 'a) -> 'a -> 'a

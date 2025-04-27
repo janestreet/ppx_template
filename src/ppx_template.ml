@@ -1,35 +1,24 @@
-open! Base
+open! Stdppx
 open! Import
 
 let structure =
-  Extension.declare
+  Extension.declare_inline
     "template"
     Structure_item
     Ast_pattern.(pstr __)
-    (fun ~loc ~path:(_ : string) stris ->
-      match Monomorphize.t#structure Monomorphize.Context.top stris with
-      | [ stri ] -> stri
-      | stris ->
-        let mod_ = Ast_builder.pmod_structure ~loc stris in
-        let loc = { loc with loc_ghost = true } in
-        [%stri include [%m mod_]])
+    (fun ~loc:(_ : location) ~path:(_ : string) stris ->
+      Monomorphize.t#structure Monomorphize.Context.top stris)
 ;;
 
 let signature =
-  Extension.declare
+  Extension.declare_inline
     "template"
     Signature_item
     Ast_pattern.(psig __)
-    (fun ~loc ~path:(_ : string) sigis ->
-      let sigis = Monomorphize.t#signature Monomorphize.Context.top sigis in
-      let open Ppxlib_jane.Shim.Signature in
-      let { psg_items; _ } = of_parsetree sigis in
-      match psg_items with
-      | [ sigi ] -> sigi
-      | _ ->
-        let mod_ = Ppxlib_jane.Ast_builder.Default.pmty_signature ~loc sigis in
-        let loc = { loc with loc_ghost = true } in
-        [%sigi: include [%m mod_]])
+    (fun ~loc:(_ : location) ~path:(_ : string) sigis ->
+      (Ppxlib_jane.Shim.Signature.of_parsetree
+         (Monomorphize.t#signature Monomorphize.Context.top sigis))
+        .psg_items)
 ;;
 
 let expression =
@@ -77,3 +66,34 @@ let () =
     "template"
     ~extensions:[ structure; signature; expression; module_expr; module_type; core_type ]
 ;;
+
+let module_binding =
+  Extension.declare
+    "@template.portable"
+    Structure_item
+    Ast_pattern.(pstr (pstr_module __ ^:: nil))
+    (fun ~loc ~path:(_ : string) mod_ ->
+      [%stri
+        [%%template [%%i Portable.module_binding ~loc:{ loc with loc_ghost = true } mod_]]])
+;;
+
+let module_declaration =
+  Extension.declare
+    "@template.portable"
+    Signature_item
+    Ast_pattern.(psig (signature (psig_module __ ^:: nil)))
+    (fun ~loc ~path:(_ : string) mod_ ->
+      [%sigi:
+        [%%template:
+          [%%i Portable.module_declaration ~loc:{ loc with loc_ghost = true } mod_]]])
+;;
+
+let () =
+  Driver.register_transformation
+    "@template.portable"
+    ~extensions:[ module_binding; module_declaration ]
+;;
+
+module Export = struct
+  module Monomorphize = Monomorphize
+end

@@ -1,10 +1,15 @@
-open! Base
+open! Stdppx
 open! Import
 
 module Suffix : sig
   type t
 
-  val create : env:Env.t -> kinds:Binding.Kind.t list -> modes:Binding.Mode.t list -> t
+  val create
+    :  env:Env.t
+    -> kinds:Binding.Kind.t list
+    -> modes:Binding.Mode.t list
+    -> modalities:Binding.Modality.t list
+    -> t
 end
 
 (** We piggyback on [Ast_traverse] because it gives us a lot of AST traversal code for

@@ -1,4 +1,4 @@
-open! Base
+open! Stdppx
 open! Import
 
 module Definitions = struct
@@ -7,6 +7,8 @@ module Definitions = struct
     type node
     type t
 
+    val of_identifier : identifier -> t
+    val compare : t -> t -> int
     val pattern : unit -> (expression, t -> 'a, 'a) Ast_pattern.t
 
     (** Some bindings, notably product kinds, may recursively contain other identifiers,
@@ -43,6 +45,13 @@ module type Binding = sig
      and type identifier := Identifier.Mode.t
      and type node = mode
 
+  module Modality :
+    S
+    with type t = Identifier.Modality.t
+     and type identifier := Identifier.Modality.t
+     and type node = modality
+
   val kind : (Kind.t, Identifier.Kind.t, jkind_annotation) t
   val mode : (Mode.t, Identifier.Mode.t, mode) t
+  val modality : (Modality.t, Identifier.Modality.t, modality) t
 end

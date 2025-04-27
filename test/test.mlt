@@ -259,7 +259,8 @@ Error: ([%template]
 (* Demonstrate error message for incorrect [@exclave_if_local] usage. *)
 let%template _ : _ =
   (let () = () in
-   ()) [@exclave_if_local local]
+   ())
+  [@exclave_if_local local]
 ;;
 
 [%%expect
@@ -270,6 +271,23 @@ Error: ([%template]
        allocations (e.g. tuples) consisting entirely of identifiers, record
        fields, and/or constants")
 |}]
+
+(* [@exclave_if_local] isn't allowed on tailcalls if the arguments aren't constant. *)
+let%template g _ : _ = f (Some 1) [@exclave_if_local local]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        "exclave_if_local is only allowed on tailcalls or syntactic
+       allocations (e.g. tuples) consisting entirely of identifiers, record
+       fields, and/or constants")
+|}]
+
+(* [@exclave_if_local] is allowed on tailcalls if the arguments are constant constructors. *)
+let%template g _ : _ = Fn.id None [@exclave_if_local local]
+
+[%%expect {| |}]
 
 (* We rely on the compiler to reject bad [exclave_] placement. *)
 let%template _ : _ =
@@ -296,7 +314,7 @@ let%template[@kind foo = Bar] _ : _ = ()
 [%%expect
   {|
 Line _, characters _-_:
-Error: expected a kind abbreviation or product kind
+Error: expected a kind abbreviation, product of kinds, or kind with a mod
 |}]
 
 let%template _ : _ = () [@kind Foo]
@@ -304,5 +322,103 @@ let%template _ : _ = () [@kind Foo]
 [%%expect
   {|
 Line _, characters _-_:
-Error: expected a kind abbreviation or product kind
+Error: expected a kind abbreviation, product of kinds, or kind with a mod
+|}]
+
+(* When [ppx_template] produces error nodes, be sure to mark any attributes in the dropped
+   code as "handled" so we get the correct error message. *)
+
+let%template f x = (g [@dropped]) (g x) [@exclave_if_local bad_attribute_location]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        "exclave_if_local is only allowed on tailcalls or syntactic
+       allocations (e.g. tuples) consisting entirely of identifiers, record
+       fields, and/or constants")
+|}]
+
+let%template _ : _ = f (x [@dropped]) [@mode bad_attribute_location]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [%template]: don't know how to mangle this expression (suffix:
+       bad_attribute_location)
+|}]
+
+let%template[@mode repeat = local, repeat = global] x = (x [@dropped])
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template] ("duplicate identifiers" (repeat)))
+|}]
+
+  type%template t : k [@@kind k = ((value mod portable) & value)]
+type%template u = (t[@kind value & (value mod portable)])
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound type constructor t__'value_'value_mod_portable''
+|}]
+
+  type%template t : k [@@kind k = (value & value) mod portable]
+type%template u = (t[@kind (value mod portable) & (value mod portable)])
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound type constructor t__''value_mod_portable'_'value_mod_portable''
+|}]
+
+module%template _ = struct
+  (* Regression test: this used to stack-overflow the ppx exe *)
+  type t [@@kind k = (k & value)] [@@warning "-34"]
+end
+
+[%%expect {| |}]
+
+(* Kind modifiers (the things after a [mod] in a kind) are [mode]s in the parsetree. But
+   we explicitly do not want to support this currently. *)
+
+module%template [@mode m = global] _ = struct
+  let f : ('a : value mod m). 'a -> 'a = fun x -> x
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unrecognized modifier m.
+|}]
+
+module%template [@mode m = global] _ = struct
+  let[@kind k = value mod m] f : ('a : k). 'a -> 'a = fun x -> x
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unrecognized modifier m.
+|}]
+
+module%template [@mode m = global] _ = struct
+  type t : (value mod contended m portable) & immediate
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unrecognized modifier m.
+|}]
+
+(* Incorrect attibute payload for [%%template.portable] *)
+module%template.portable [@modality m = (portable, nonportable)] F = struct end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ident expected
 |}]

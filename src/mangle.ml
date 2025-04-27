@@ -1,4 +1,4 @@
-open! Base
+open! Stdppx
 open! Import
 
 let concat_with_underscores = String.concat ~sep:"__"
@@ -8,29 +8,39 @@ module Suffix = struct
 
   (* This code using [env] to map jkinds needs to live somewhere, and be called every time
      we go to mangle an identifier. Here seems like as reasonable a place as any. *)
-  let create ~env ~kinds ~modes =
+  let create ~env ~kinds ~modes ~modalities =
     let resolve
       (type binding id node)
       ((module Binding) : (binding, id, node) Binding.t)
       bindings
       ~find
       =
-      List.map
-        bindings
-        ~f:(Binding.resolve ~find_identifier:(find env) >> Binding.to_mangled_identifier)
+      List.map bindings ~f:(fun binding ->
+        binding
+        |> Binding.resolve ~find_identifier:(find env)
+        |> Binding.to_mangled_identifier)
     in
     let kinds = resolve Binding.kind kinds ~find:Env.find_kind in
     let modes = resolve Binding.mode modes ~find:Env.find_mode in
-    let txt (type id cmp) ((module Id) : (id, cmp) Identifier.t) ids =
-      if List.for_all ids ~f:(Id.equal Id.default)
+    let modalities = resolve Binding.modality modalities ~find:Env.find_modality in
+    let txt (type id) ((module Id) : id Identifier.t) ids =
+      if List.for_all ~f:(fun elt -> Id.Set.mem elt Id.defaults) ids
       then []
       else List.map ~f:Id.to_string ids
     in
-    { txt = txt Identifier.kind kinds @ txt Identifier.mode modes; loc = Location.none }
+    { txt =
+        txt Identifier.kind kinds
+        @ txt Identifier.mode modes
+        @ txt Identifier.modality modalities
+    ; loc = Location.none
+    }
   ;;
 end
 
-let mangle_error { txt; loc } kind =
+let explicitly_drop = Attribute.explicitly_drop
+
+let mangle_error { txt; loc } kind explicitly_drop_method node =
+  explicitly_drop_method node;
   Location.error_extensionf
     ~loc
     "[%%template]: don't know how to mangle this %s (suffix: %s)"
@@ -53,7 +63,9 @@ let t =
     method! expression_desc suffix =
       function
       | Pexp_ident _ as desc -> super#expression_desc suffix desc
-      | _ -> Pexp_extension (mangle_error suffix "expression")
+      | expr_desc ->
+        Pexp_extension
+          (mangle_error suffix "expression" explicitly_drop#expression_desc expr_desc)
 
     method! expression suffix expr =
       { expr with
@@ -64,7 +76,13 @@ let t =
     method! module_expr_desc suffix =
       function
       | Pmod_ident _ as desc -> super#module_expr_desc suffix desc
-      | _ -> Pmod_extension (mangle_error suffix "module expression")
+      | mod_expr_desc ->
+        Pmod_extension
+          (mangle_error
+             suffix
+             "module expression"
+             explicitly_drop#module_expr_desc
+             mod_expr_desc)
 
     method! module_expr suffix mod_expr =
       { mod_expr with
@@ -78,7 +96,9 @@ let t =
         Ptyp_constr (self#loc self#longident suffix name, params)
       | Ptyp_package (name, params) ->
         Ptyp_package (self#loc self#longident suffix name, params)
-      | _ -> Ptyp_extension (mangle_error suffix "core type")
+      | core_type_desc ->
+        Ptyp_extension
+          (mangle_error suffix "core type" explicitly_drop#core_type_desc core_type_desc)
 
     method! core_type suffix typ =
       { typ with
@@ -88,7 +108,13 @@ let t =
     method! module_type_desc suffix =
       function
       | Pmty_ident _ as desc -> super#module_type_desc suffix desc
-      | _ -> Pmty_extension (mangle_error suffix "module type")
+      | mod_type_desc ->
+        Pmty_extension
+          (mangle_error
+             suffix
+             "module type"
+             explicitly_drop#module_type_desc
+             mod_type_desc)
 
     method! module_type suffix mod_typ =
       { mod_typ with
@@ -101,13 +127,15 @@ let t =
       | Ppat_any | Ppat_var _ | Ppat_alias _ -> super#pattern_desc suffix pattern_desc
       | Ppat_constraint (pat, typ, modes) ->
         Ppat_constraint (self#pattern suffix pat, typ, modes)
-        |> Ppxlib_jane.Shim.Pattern_desc.to_parsetree
+        |> Ppxlib_jane.Shim.Pattern_desc.to_parsetree ~loc:pat.ppat_loc
       | _ ->
         (* If the user didn't request a polymorphic binding, or they only requested the
            [value] kinds, don't complain. *)
         if List.is_empty suffix.txt
         then pattern_desc
-        else Ppat_extension (mangle_error suffix "pattern")
+        else
+          Ppat_extension
+            (mangle_error suffix "pattern" explicitly_drop#pattern_desc pattern_desc)
 
     method! pattern suffix pat =
       { pat with
