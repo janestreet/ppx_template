@@ -1,35 +1,37 @@
-open! Base
+open! Stdppx
 open! Import
 
-module Definitions = struct
-  module type S = sig
-    type t
+module type S = sig
+  type t
+  type ('a, !+'data) map
+  type 'elt set
 
-    val compare : t -> t -> int
-    val equal : t -> t -> bool
-    val sexp_of_t : t -> Sexp.t
+  val compare : t -> t -> int
+  val equal : t -> t -> bool
+  val sexp_of_t : t -> Sexp.t
+  val to_string : t -> string
+  val of_string : string -> t
 
-    include Comparator.S with type t := t
-    include Stringable.S with type t := t
+  module Map : Map.S with type key = t and type 'data t = (t, 'data) map
+  module Set : Set.S with type elt = t and type t = t set
 
-    val default : t
-  end
-
-  type ('a, 'cmp) t = (module S with type t = 'a and type comparator_witness = 'cmp)
-
-  module M (Id : S) = struct
-    type nonrec t = (Id.t, Id.comparator_witness) t
-  end
+  val defaults : Set.t
 end
 
 module type Identifier = sig
-  include module type of struct
-    include Definitions
-  end
+  type ('a, !+'data) map
+  type 'a set
+
+  module type S =
+    S with type ('key, 'data) map := ('key, 'data) map and type 'key set := 'key set
+
+  type 'a t = (module S with type t = 'a)
 
   module Kind : S
   module Mode : S
+  module Modality : S
 
-  val kind : M(Kind).t
-  val mode : M(Mode).t
+  val kind : Kind.t t
+  val mode : Mode.t t
+  val modality : Modality.t t
 end

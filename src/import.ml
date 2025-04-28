@@ -1,7 +1,6 @@
 include struct
   open Ppxlib
   include Ast
-  module Ast_builder = Ast_builder.Default
 
   module Ast_pattern = struct
     include Ast_pattern
@@ -26,6 +25,16 @@ include struct
 
   type jkind_annotation = Shim.jkind_annotation
   type mode = Shim.Mode.t = Mode of string [@@unboxed]
+  type modality = Shim.Modality.t = Modality of string [@@unboxed]
 end
 
-include Composition_infix
+module Ast_builder = struct
+  include Ppxlib.Ast_builder.Default
+  include Ppxlib_jane.Ast_builder.Default
+end
+
+include struct
+  open Sexplib0
+  module Sexp = Sexp
+  include Sexp_conv
+end

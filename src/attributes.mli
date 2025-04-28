@@ -1,4 +1,4 @@
-open! Base
+open! Stdppx
 open! Import
 
 type poly :=
@@ -18,6 +18,12 @@ type mono :=
   | `module_type
   ]
 
+type zero_alloc_if_local :=
+  [ `expression
+  | `value_binding
+  | `value_description
+  ]
+
 module Context : sig
   type ('a, 'w) t =
     | Expression : (expression, [> `expression ]) t
@@ -35,18 +41,59 @@ module Context : sig
 
   type nonrec 'a poly = ('a, poly) t
   type nonrec 'a mono = ('a, mono) t
+  type nonrec 'a zero_alloc_if_local = ('a, zero_alloc_if_local) t
 end
 
+(** A [('w, 'b) t] is a handler that knows how to consume a particular attribute on ['w]
+    syntax items, and produce back ['b] values. Note: if the attribute isn't present, the
+    handler will return some default ['b], whether that be [None] (if ['b] is [_ option])
+    or some semantic default for the given ['b]. *)
 type ('w, 'b) t
 
-val kind_poly : (poly, Bindings.M(Identifier.Kind)(Binding.Kind).t Or_error.t) t
-val mode_poly : (poly, Bindings.M(Identifier.Mode)(Binding.Mode).t Or_error.t) t
-val kind_mono : (mono, Binding.Kind.t list) t
-val mode_mono : (mono, Binding.Mode.t list) t
-val exclave_if_local : ([ `expression ], Identifier.Mode.t) t
-val consume : ('w, 'b) t -> ('a, 'w) Context.t -> 'a -> ('a * 'b) option
-val get : ('w, 'b) t -> ('a, 'w) Context.t -> 'a -> 'b option
-val has : ('w, _) t -> ('a, 'w) Context.t -> 'a -> bool
+(** [consume t ctx item] runs the handler [t] in the context [ctx] on [item]. The handler
+    [t] strips its corresponding attributes from [item] in addition to producing its
+    output. *)
+val consume : ('w, 'b) t -> ('a, 'w) Context.t -> 'a -> 'a * 'b
+
+module Poly : sig
+  type t =
+    { kinds : Bindings.M(Identifier.Kind)(Binding.Kind).t option
+    ; modes : Bindings.M(Identifier.Mode)(Binding.Mode).t option
+    ; modalities : Bindings.M(Identifier.Modality)(Binding.Modality).t option
+    }
+end
+
+(** A handler for attributes that make definitions/declarations polymorphic. Might return
+    an [Error _] if the attribute's payload is malformed. Defaults to
+    [Ok { kinds = None; modes = None }]. *)
+val poly : (poly, (Poly.t, Sexp.t) result) t
+
+module Mono : sig
+  type t =
+    { kinds : Binding.Kind.t list
+    ; modes : Binding.Mode.t list
+    ; modalities : Binding.Modality.t list
+    }
+end
+
+(** A handler for attributes that mangle identifiers to the correct monomorphized name.
+    Defaults to [{ kinds = []; modes = [] }]. *)
+val mono : (mono, Mono.t) t
+
+(** A handler for attributes that optionally insert [exclave_] markers. *)
+val exclave_if_local : ([ `expression ], Identifier.Mode.t option) t
+
+(** A handler for attributes that optionally annotate code as zero-alloc. When the
+    attribute is present, produces [Some (loc, mode, payload)], where [loc] is the
+    location of the payload, [mode] is the mode to compare against, and [payload] is the
+    payload to be given to the [[@@zero_alloc]] attribute. *)
+val zero_alloc_if_local
+  : (zero_alloc_if_local, (location * Identifier.Mode.t * expression list) option) t
+
+val conflate_mono_modes : (mono, Identifier.Mode.t loc list) t
+val conflate_mono_modalities : (mono, Identifier.Modality.t loc list) t
+val conflate_poly_modes : (poly, Identifier.Mode.t loc list) t
+val conflate_poly_modalities : (poly, Identifier.Modality.t loc list) t
 
 module Floating : sig
   type poly :=
@@ -62,9 +109,19 @@ module Floating : sig
     type nonrec 'a poly = ('a, poly) t
   end
 
-  type ('w, 'b) t
+  module Poly : sig
+    module Bindings : sig
+      type t =
+        | Kinds of Bindings.M(Identifier.Kind)(Binding.Kind).t
+        | Modes of Bindings.M(Identifier.Mode)(Binding.Mode).t
+        | Modalities of Bindings.M(Identifier.Modality)(Binding.Modality).t
+    end
 
-  val kind_poly : (poly, Bindings.M(Identifier.Kind)(Binding.Kind).t Or_error.t) t
-  val mode_poly : (poly, Bindings.M(Identifier.Mode)(Binding.Mode).t Or_error.t) t
-  val convert : ('w, 'b) t -> ('a, 'w) Context.t -> 'a -> 'b option
+    type t =
+      { bindings : Bindings.t
+      ; default : bool
+      }
+  end
+
+  val convert_poly : ('a, poly) Context.t -> 'a -> (Poly.t, Sexp.t) result option
 end

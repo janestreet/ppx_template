@@ -9,42 +9,36 @@ open! Core
    exercising some of the capabilities. *)
 
 module%template Comparable : sig
-  [@@@mode m = (global, local)]
+  [@@@mode.default m = (global, local)]
 
-  type ('a, 'b) compare_fn := 'a -> 'a -> 'b [@@mode m]
-  type ('a, 'b) fn := 'a -> 'b [@@mode m]
-  type 'a select_fn := 'a -> 'a -> 'a [@@mode m]
+  type ('a, 'b) compare_fn := 'a -> 'a -> 'b
+  type ('a, 'b) fn := 'a -> 'b
+  type 'a select_fn := 'a -> 'a -> 'a
 
   val lexicographic
     :  (('a, int) compare_fn[@mode m]) list
     -> (('a, int) compare_fn[@mode m])
-  [@@mode m]
 
   val lift
     :  (('a, 'result) compare_fn[@mode m])
     -> f:(('b, 'a) fn[@mode m])
     -> (('b, 'result) compare_fn[@mode m])
-  [@@mode m]
 
   val reverse : (('a, 'result) compare_fn[@mode m]) -> (('a, 'result) compare_fn[@mode m])
-  [@@mode m]
 
-  type 'a reversed = 'a [@@mode m]
+  type 'a reversed = 'a
 
   val compare_reversed
     :  (('a, int) compare_fn[@mode m])
     -> (('a reversed, int) compare_fn[@mode m])
-  [@@mode m]
 
   val equal : (('a, int) compare_fn[@mode m]) -> (('a, bool) compare_fn[@mode m])
-  [@@mode m]
-
-  val max : (('a, int) compare_fn[@mode m]) -> ('a select_fn[@mode m]) [@@mode m]
-  val min : (('a, int) compare_fn[@mode m]) -> ('a select_fn[@mode m]) [@@mode m]
+  val max : (('a, int) compare_fn[@mode m]) -> ('a select_fn[@mode m])
+  val min : (('a, int) compare_fn[@mode m]) -> ('a select_fn[@mode m])
 end = struct
-  [@@@mode m = (global, local)]
+  [@@@mode.default m = (global, local)]
 
-  let[@mode m] rec lexicographic cmps x y =
+  let rec lexicographic cmps x y =
     match cmps with
     | cmp :: cmps ->
       let res = cmp x y in
@@ -52,22 +46,22 @@ end = struct
     | [] -> 0
   ;;
 
-  let[@mode m] lift cmp ~f x y = cmp (f x) (f y) [@nontail]
-  let[@mode m] reverse cmp x y = cmp y x
+  let lift cmp ~f x y = cmp (f x) (f y) [@nontail]
+  let reverse cmp x y = cmp y x
 
-  type 'a reversed = 'a [@@mode m]
+  type 'a reversed = 'a
 
-  let[@mode m] compare_reversed cmp x y = cmp y x
-  let[@mode m] equal cmp x y = cmp x y = 0
-  let[@mode m] geq cmp x y = cmp x y >= 0
-  let[@mode m] leq cmp x y = cmp x y <= 0
+  let compare_reversed cmp x y = cmp y x
+  let equal cmp x y = cmp x y = 0
+  let geq cmp x y = cmp x y >= 0
+  let leq cmp x y = cmp x y <= 0
 
-  let[@mode m] max cmp x y =
+  let max cmp x y =
     let is_geq = (geq [@mode m]) cmp x y in
     Bool.select is_geq x y [@exclave_if_local m]
   ;;
 
-  let[@mode m] min cmp x y =
+  let min cmp x y =
     let is_leq = (leq [@mode m]) cmp x y in
     Bool.select is_leq x y [@exclave_if_local m]
   ;;
@@ -91,7 +85,7 @@ let x = T.of_char 'x'
 let y = T.of_char 'y'
 
 [%%template
-[@@@mode m = (global, local)]
+[@@@mode.default m = (global, local)]
 
 let%expect_test "lexicographic" =
   let print_result x y =

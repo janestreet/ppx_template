@@ -27,15 +27,15 @@ let iround_down1_exn (type a) ((module M) : a module1) = M.iround_down_exn
 
 (* $MDX part-begin=arity0 *)
 [%%template
-[@@@kind k = (value, float64)]
+[@@@kind.default k = (value, float64)]
 
-module type [@kind k] S0 = sig
+module type S0 = sig
   type t
 
   include S1 with type t := t
 end
 
-module [@kind k] M : S0 [@kind k] with type t = (float[@kind k]) = struct
+module M : S0 [@kind k] with type t = (float[@kind k]) = struct
   type t = (float[@kind k])
 
   let round_up = (Float.round_up [@kind k])
@@ -46,11 +46,11 @@ end
 (* $MDX part-end *)
 
 (* $MDX part-begin=arity0-of-arity1 *)
-type module0 = ((module S0 with type t = (float[@kind k]))[@kind k]) [@@kind k]
+type module0 = ((module S0 with type t = (float[@kind k]))[@kind k])
 
-let[@kind k] module0 : (module0[@kind k]) = (module M [@kind k])
-let[@kind k] round_up0 x = round_up1 (module0 [@kind k]) x
-let[@kind k] round_down0 x = round_down1 (module0 [@kind k]) x
-let[@kind k] iround_up0_exn x = iround_up1_exn (module0 [@kind k]) x
-let[@kind k] iround_down0_exn x = iround_down1_exn (module0 [@kind k]) x]
+let module0 : (module0[@kind k]) = (module M [@kind k])
+let round_up0 x = round_up1 (module0 [@kind k]) x
+let round_down0 x = round_down1 (module0 [@kind k]) x
+let iround_up0_exn x = iround_up1_exn (module0 [@kind k]) x
+let iround_down0_exn x = iround_down1_exn (module0 [@kind k]) x]
 (* $MDX part-end *)

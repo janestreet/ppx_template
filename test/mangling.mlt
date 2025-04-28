@@ -1,0 +1,66 @@
+#verbose true
+
+(* Demonstrate the behavior of name mangling, in particular with respect
+   to the default/legacy modes.
+
+   Also ensures that we notice changes to mangling; while we don't guarantee
+   stability, it's still worth avoiding accidental changes. *)
+
+let%template[@mode
+              c = (uncontended, contended)
+              , g = (global, local)
+              , p = (nonportable, portable)] id
+  : 'a. 'a @ c g p -> 'a @ c g p
+  =
+  fun x -> x
+;;
+
+[%%expect
+  {|
+val id : 'a -> 'a = <fun>
+val id__uncontended__global__portable : 'a @ portable -> 'a @ portable =
+  <fun>
+val id__uncontended__local__nonportable : local_ 'a -> local_ 'a = <fun>
+val id__uncontended__local__portable :
+  local_ 'a @ portable -> local_ 'a @ portable = <fun>
+val id__contended__global__nonportable : 'a @ contended -> 'a @ contended =
+  <fun>
+val id__contended__global__portable :
+  'a @ portable contended -> 'a @ portable contended = <fun>
+val id__contended__local__nonportable :
+  local_ 'a @ contended -> local_ 'a @ contended = <fun>
+val id__contended__local__portable :
+  local_ 'a @ portable contended -> local_ 'a @ portable contended = <fun>
+|}]
+
+(* Demonstrate the behavior of name mangling, in particular with respect
+   to the default/legacy modalities.
+
+   Also ensures that we notice changes to mangling; while we don't guarantee
+   stability, it's still worth avoiding accidental changes. *)
+
+module%template
+  [@modality
+    c = (uncontended, contended), g = (global, local), p = (nonportable, portable)] M =
+struct
+  type 'a t = { x : 'a @@ c g p }
+end
+
+[%%expect
+  {|
+module M__uncontended__global__nonportable :
+  sig type 'a t = { global_ x : 'a; } end
+module M__uncontended__global__portable :
+  sig type 'a t = { global_ x : 'a @@ portable; } end
+module M : sig type 'a t = { x : 'a; } end
+module M__uncontended__local__portable :
+  sig type 'a t = { x : 'a @@ portable; } end
+module M__contended__global__nonportable :
+  sig type 'a t = { global_ x : 'a @@ contended; } end
+module M__contended__global__portable :
+  sig type 'a t = { global_ x : 'a @@ portable contended; } end
+module M__contended__local__nonportable :
+  sig type 'a t = { x : 'a @@ contended; } end
+module M__contended__local__portable :
+  sig type 'a t = { x : 'a @@ portable contended; } end
+|}]

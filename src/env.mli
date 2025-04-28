@@ -1,4 +1,4 @@
-open! Base
+open! Stdppx
 open! Import
 
 (** A map from the kind and mode variables introduced by this PPX to their current
@@ -15,6 +15,7 @@ type t
 val create
   :  kinds:Bindings.Instance.M(Identifier.Kind)(Binding.Kind).t
   -> modes:Bindings.Instance.M(Identifier.Mode)(Binding.Mode).t
+  -> modalities:Bindings.Instance.M(Identifier.Modality)(Binding.Modality).t
   -> t
 
 val empty : t
@@ -28,10 +29,19 @@ val find_kind : (Identifier.Kind.t, Binding.Kind.t) find
 (** As [find_kind], but for modes. *)
 val find_mode : (Identifier.Mode.t, Binding.Mode.t) find
 
+(** As [find_kind], but for modalities. *)
+val find_modality : (Identifier.Modality.t, Binding.Modality.t) find
+
 val find_kind_exn : (Identifier.Kind.t, Binding.Kind.t) find_exn
 val find_mode_exn : (Identifier.Mode.t, Binding.Mode.t) find_exn
+val find_modality_exn : (Identifier.Modality.t, Binding.Modality.t) find_exn
 
-(** [lookup_and_set_all ~current_env ~uninterpreted_env] looks up any kinds or modes in
-    [uninterpreted_env] bound in [current_env], and then merges the two environments,
-    resolving conflicts by preferring [uninterpreted_env]. *)
-val lookup_and_set_all : current_env:t -> uninterpreted_env:t -> t
+val conflate
+  :  t
+  -> modes:Binding.Mode.t Loc.t list
+  -> modalities:Binding.Modality.t Loc.t list
+  -> t
+
+(** [set_all ~current_env ~uninterpreted_env] then merges the two environments, resolving
+    conflicts by preferring [uninterpreted_env]. *)
+val set_all : current_env:t -> uninterpreted_env:t -> t
