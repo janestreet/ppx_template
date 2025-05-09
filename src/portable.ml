@@ -12,7 +12,7 @@ open! Import
 let portable_pmb_type pmb_type ~loc ~mvar =
   let rec loop pmb_type =
     match Ppxlib_jane.Shim.Module_type_desc.of_parsetree pmb_type.pmty_desc with
-    | Pmty_functor (param, pmb_type, modes) ->
+    | Pmty_functor (param, ret_type, modes) ->
       let param =
         match Ppxlib_jane.Shim.Functor_parameter.of_parsetree param with
         | Unit -> Unit
@@ -24,7 +24,7 @@ let portable_pmb_type pmb_type ~loc ~mvar =
         pmty_desc =
           Ppxlib_jane.Shim.Module_type_desc.to_parsetree
             ~loc
-            (Pmty_functor (param, loop pmb_type, modes))
+            (Pmty_functor (param, loop ret_type, modes))
       ; pmty_loc = loc
       }
     | Pmty_signature signature ->

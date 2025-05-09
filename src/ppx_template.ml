@@ -61,10 +61,13 @@ let core_type =
       Monomorphize.t#core_type Monomorphize.Context.top typ)
 ;;
 
+let mono_attrs = []
+
 let () =
   Driver.register_transformation
     "template"
     ~extensions:[ structure; signature; expression; module_expr; module_type; core_type ]
+    ~rules:mono_attrs
 ;;
 
 let module_binding =

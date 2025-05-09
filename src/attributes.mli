@@ -1,5 +1,6 @@
 open! Stdppx
 open! Import
+open Language
 
 type poly :=
   [ `value_binding
@@ -18,7 +19,7 @@ type mono :=
   | `module_type
   ]
 
-type zero_alloc_if_local :=
+type zero_alloc_if :=
   [ `expression
   | `value_binding
   | `value_description
@@ -39,9 +40,10 @@ module Context : sig
     | Include_infos :
         ((module_expr, module_type) Either.t include_infos, [> `include_infos ]) t
 
+  type 'w packed = private T : (_, 'w) t -> 'w packed [@@unboxed]
   type nonrec 'a poly = ('a, poly) t
   type nonrec 'a mono = ('a, mono) t
-  type nonrec 'a zero_alloc_if_local = ('a, zero_alloc_if_local) t
+  type nonrec 'a zero_alloc_if = ('a, zero_alloc_if) t
 end
 
 (** A [('w, 'b) t] is a handler that knows how to consume a particular attribute on ['w]
@@ -55,45 +57,56 @@ type ('w, 'b) t
     output. *)
 val consume : ('w, 'b) t -> ('a, 'w) Context.t -> 'a -> 'a * 'b
 
+(** A map from [('a, 'w) Context.t] to [('a, 'b) Attribute.t]. *)
+module Attribute_map : sig
+  type ('w, 'b) t
+
+  val find_exn : ('w, 'b) t -> ('a, 'w) Context.t -> ('a, 'b) Attribute.t
+end
+
 module Poly : sig
-  type t =
-    { kinds : Bindings.M(Identifier.Kind)(Binding.Kind).t option
-    ; modes : Bindings.M(Identifier.Mode)(Binding.Mode).t option
-    ; modalities : Bindings.M(Identifier.Modality)(Binding.Modality).t option
-    }
+  type t = Poly : 'mangle Type.t * ('a, 'mangle) Binding.t list -> t
 end
 
 (** A handler for attributes that make definitions/declarations polymorphic. Might return
     an [Error _] if the attribute's payload is malformed. Defaults to
     [Ok { kinds = None; modes = None }]. *)
-val poly : (poly, (Poly.t, Sexp.t) result) t
+val poly : (poly, (Poly.t list, Sexp.t) result) t
 
 module Mono : sig
-  type t =
-    { kinds : Binding.Kind.t list
-    ; modes : Binding.Mode.t list
-    ; modalities : Binding.Modality.t list
-    }
+  type t = Expression.Basic.packed list Type.Map.t
+
+  val contexts : mono Context.packed list
+  val kind_attr : (mono, Expression.Basic.packed list) Attribute_map.t
+  val mode_attr : (mono, Expression.Basic.packed list) Attribute_map.t
+  val modality_attr : (mono, Expression.Basic.packed list) Attribute_map.t
+  val alloc_attr : (mono, Expression.Basic.packed list) Attribute_map.t
 end
 
 (** A handler for attributes that mangle identifiers to the correct monomorphized name.
     Defaults to [{ kinds = []; modes = [] }]. *)
 val mono : (mono, Mono.t) t
 
-(** A handler for attributes that optionally insert [exclave_] markers. *)
-val exclave_if_local : ([ `expression ], Identifier.Mode.t option) t
+(** A handler for attributes that optionally insert [exclave_] markers. We expect to
+    replace these attributes with mode-polymorphic tailcalls and/or unboxed types. *)
+val exclave_if_local : ([ `expression ], (Type.mode Expression.t * location) option) t
+
+(** Like {!exclave_if_local}, but for allocation identifiers. *)
+val exclave_if_stack : ([ `expression ], (Type.alloc Expression.t * location) option) t
 
 (** A handler for attributes that optionally annotate code as zero-alloc. When the
     attribute is present, produces [Some (loc, mode, payload)], where [loc] is the
     location of the payload, [mode] is the mode to compare against, and [payload] is the
     payload to be given to the [[@@zero_alloc]] attribute. *)
 val zero_alloc_if_local
-  : (zero_alloc_if_local, (location * Identifier.Mode.t * expression list) option) t
+  : (zero_alloc_if, (location * Type.mode Expression.t * expression list) option) t
 
-val conflate_mono_modes : (mono, Identifier.Mode.t loc list) t
-val conflate_mono_modalities : (mono, Identifier.Modality.t loc list) t
-val conflate_poly_modes : (poly, Identifier.Mode.t loc list) t
-val conflate_poly_modalities : (poly, Identifier.Modality.t loc list) t
+(** Like {!zero_alloc_if_local}, but for allocation identifiers. *)
+val zero_alloc_if_stack
+  : (zero_alloc_if, (location * Type.alloc Expression.t * expression list) option) t
+
+val conflate_mono : (mono, Conflation.packed list) t
+val conflate_poly : (poly, Conflation.packed list) t
 
 module Floating : sig
   type poly :=
@@ -110,15 +123,8 @@ module Floating : sig
   end
 
   module Poly : sig
-    module Bindings : sig
-      type t =
-        | Kinds of Bindings.M(Identifier.Kind)(Binding.Kind).t
-        | Modes of Bindings.M(Identifier.Mode)(Binding.Mode).t
-        | Modalities of Bindings.M(Identifier.Modality)(Binding.Modality).t
-    end
-
     type t =
-      { bindings : Bindings.t
+      { bindings : Poly.t
       ; default : bool
       }
   end

@@ -1,15 +1,11 @@
 open! Stdppx
 open! Import
+open Language
 
 module Suffix : sig
   type t
 
-  val create
-    :  env:Env.t
-    -> kinds:Binding.Kind.t list
-    -> modes:Binding.Mode.t list
-    -> modalities:Binding.Modality.t list
-    -> t
+  val create : Value.Basic.packed list Type.Map.t -> t
 end
 
 (** We piggyback on [Ast_traverse] because it gives us a lot of AST traversal code for
@@ -27,3 +23,12 @@ end
     functions, rather than creating a fresh object with many methods and potentially some
     closures each time. *)
 val t : Suffix.t Ast_traverse.map_with_context
+
+(** Apply name mangling to the item, using the given attribute expressions and
+    environment. *)
+val mangle
+  :  'a Attributes.Context.mono
+  -> 'a
+  -> Expression.Basic.packed list Type.Map.t
+  -> env:Env.t
+  -> 'a

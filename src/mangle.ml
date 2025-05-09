@@ -1,37 +1,51 @@
 open! Stdppx
 open! Import
+open Language
+
+(* Individual values are mangled based on their structures, and then concatenated together
+   with double-underscores. *)
+let rec mangle_value : type a. a Type.basic Value.t -> string =
+  let group strings = strings |> String.concat ~sep:"_" |> Printf.sprintf "'%s'" in
+  fun value ->
+    match value with
+    | Identifier ident -> ident.ident
+    | Kind_product kinds -> List.map kinds ~f:mangle_value |> group
+    | Kind_mod (kind, modifiers) ->
+      mangle_value kind :: "mod" :: String.Set.to_list modifiers |> group
+;;
 
 let concat_with_underscores = String.concat ~sep:"__"
+
+(* We check whether a value is a default value for its axis, as we don't include those
+   in the name mangling scheme. *)
+let is_default : type a. a Type.basic Value.t -> bool =
+  fun value ->
+  match Value.type_ value, value with
+  | Basic Kind, Identifier { ident = "value"; _ } -> true
+  | Basic Kind, _ -> false
+  | Basic Mode, Identifier { ident = "global" | "nonportable" | "uncontended"; _ } -> true
+  | Basic Mode, _ -> false
+  | Basic Modality, Identifier { ident = "local" | "nonportable" | "uncontended"; _ } ->
+    true
+  | Basic Modality, _ -> false
+  | Basic Alloc, Identifier { ident = "heap"; _ } -> true
+  | Basic Alloc, _ -> false
+;;
 
 module Suffix = struct
   type t = string list loc
 
-  (* This code using [env] to map jkinds needs to live somewhere, and be called every time
-     we go to mangle an identifier. Here seems like as reasonable a place as any. *)
-  let create ~env ~kinds ~modes ~modalities =
-    let resolve
-      (type binding id node)
-      ((module Binding) : (binding, id, node) Binding.t)
-      bindings
-      ~find
-      =
-      List.map bindings ~f:(fun binding ->
-        binding
-        |> Binding.resolve ~find_identifier:(find env)
-        |> Binding.to_mangled_identifier)
-    in
-    let kinds = resolve Binding.kind kinds ~find:Env.find_kind in
-    let modes = resolve Binding.mode modes ~find:Env.find_mode in
-    let modalities = resolve Binding.modality modalities ~find:Env.find_modality in
-    let txt (type id) ((module Id) : id Identifier.t) ids =
-      if List.for_all ~f:(fun elt -> Id.Set.mem elt Id.defaults) ids
-      then []
-      else List.map ~f:Id.to_string ids
+  let create mono =
+    let extract type_ =
+      match Type.Map.find_opt (P type_) mono with
+      | None -> []
+      | Some manglers ->
+        if List.for_all manglers ~f:(fun (Value.Basic.P value) -> is_default value)
+        then []
+        else List.map manglers ~f:(fun (Value.Basic.P value) -> mangle_value value)
     in
     { txt =
-        txt Identifier.kind kinds
-        @ txt Identifier.mode modes
-        @ txt Identifier.modality modalities
+        extract Type.kind @ extract Type.mode @ extract Type.modality @ extract Type.alloc
     ; loc = Location.none
     }
   ;;
@@ -164,4 +178,23 @@ let t =
 
     method! include_infos _ _ info = info
   end
+;;
+
+let mangle (type a) (attr_ctx : a Attributes.Context.mono) (node : a) mangle_exprs ~env =
+  if Type.Map.is_empty mangle_exprs
+  then node
+  else (
+    let manglers =
+      Type.Map.map
+        (fun exprs ->
+          List.map exprs ~f:(fun (Expression.Basic.P expr) ->
+            Value.Basic.P (Env.eval env expr)))
+        mangle_exprs
+    in
+    let suffix = Suffix.create manglers in
+    match attr_ctx with
+    | Expression -> t#expression suffix node
+    | Module_expr -> t#module_expr suffix node
+    | Core_type -> t#core_type suffix node
+    | Module_type -> t#module_type suffix node)
 ;;

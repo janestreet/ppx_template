@@ -1,68 +1,10 @@
 open! Stdppx
 open! Import
-
-let at_most_one_pattern p = Ast_pattern.(p ^:: nil ||| map0 nil ~f:[])
-let at_most_one_eval p = Ast_pattern.(pstr (at_most_one_pattern (pstr_eval p nil)))
-
-let ident (type a) ((module Id) : a Identifier.t) =
-  Ast_pattern.(pexp_ident (map1 (lident __) ~f:Id.of_string))
-;;
-
-let one_or_many a b = Ast_pattern.(map1 a ~f:(fun x -> [ x ]) ||| b)
-let tuple_or_one p = one_or_many p Ast_pattern.(pexp_tuple (many p))
-
-type 'a pat = { pat : 'b. unit -> (expression, 'a -> 'b, 'b) Ast_pattern.t } [@@unboxed]
-
-let one_or_many_as_list { pat } =
-  let open Ast_pattern in
-  one_or_many
-    (pat ())
-    (map2 (pexp_apply (pat ()) (many (pair nolabel (pat ())))) ~f:List.cons)
-;;
-
-(* Parses an [expression] of the form [a b c] (i.e. function application of bindings)
-   as [[ "a"; "b"; "c" ]]. *)
-let binding_apply_pattern (type a id node) ((module Binding) : (a, id, node) Binding.t) =
-  one_or_many_as_list { pat = Binding.pattern }
-;;
-
-(* Parses an [expression] of the form [a, b, c] (i.e. a tuple of bindings) as
-   [[ "a"; "b"; "c" ]]. *)
-let binding_tuple_pattern (type a id node) ((module Binding) : (a, id, node) Binding.t) =
-  tuple_or_one (Binding.pattern ())
-;;
-
-(* Parses an [expression] of the form [l = (a, b)] as ["l", [ "a"; "b" ]]. *)
-let ident_equals_pattern id binding =
-  let open Ast_pattern in
-  pexp_apply
-    (pexp_ident (lident (string "=")))
-    (pair nolabel (ident id) ^:: pair nolabel (binding_tuple_pattern binding) ^:: nil)
-  |> pack2
-;;
-
-(* Parses a [payload] of the form [l = (a, b), m = (c, d)] as
-   [[ "l", [ "a"; "b" ]; "m", [ "c"; "d" ] ]], or of the form [a b] as
-   [[ "a", [ "a" ]; "b", [ "b" ]]]. *)
-let binding_poly_pattern
-  (type id binding node)
-  (id : id Identifier.t)
-  ((module Binding) as binding : (binding, id, node) Binding.t)
-  =
-  let open Ast_pattern in
-  tuple_or_one (ident_equals_pattern id binding)
-  ||| map1
-        (binding_apply_pattern binding)
-        ~f:
-          (List.map ~f:(fun binding -> Binding.to_mangled_identifier binding, [ binding ]))
-  |> at_most_one_eval
-;;
-
-(* Parses a [payload] of the form [a b c] as [[ "a"; "b"; "c" ]]. *)
-let binding_mono_pattern binding = binding_apply_pattern binding |> at_most_one_eval
+open Language
 
 module type Context = sig
   type ('a, 'w) t [@@immediate]
+  type 'w packed = T : (_, 'w) t -> 'w packed [@@unboxed]
 end
 
 module type Attribute = sig
@@ -71,10 +13,6 @@ module type Attribute = sig
   end
 
   type ('a, 'b) t
-end
-
-module Packed (Context : Context) = struct
-  type 'w t = T : (_, 'w) Context.t -> 'w t [@@unboxed]
 end
 
 module With_attribute (Context : Context) (Attribute : Attribute) = struct
@@ -119,27 +57,28 @@ module Make
        include Context
 
        val to_ppxlib : ('a, _) t -> 'a Attribute.Context.t
-       val same_witness_exn : ('a, 'w) t -> ('b, 'w) t -> ('a, 'b) Type.eq
+       val same_witness_exn : ('a, 'w) t -> ('b, 'w) t -> ('a, 'b) Stdlib.Type.eq
      end) =
 struct
+  module Attribute_map = struct
+    type ('w, 'b) t =
+      ('w Context.packed, ('w, 'b) With_attribute(Context)(Attribute).t) Map_poly.t
+
+    let find_exn (type a w b) (t : (w, b) t) (ctx : (a, w) Context.t) : (a, b) Attribute.t
+      =
+      let (T (ctx', attribute)) = Map_poly.find_exn t (T ctx) in
+      let Equal = Context.same_witness_exn ctx ctx' in
+      attribute
+    ;;
+  end
+
   let declare ~name ~contexts ~pattern ~k =
     Map_poly.of_list
-      (List.map contexts ~f:(fun (T context as key : _ Packed(Context).t) ->
+      (List.map contexts ~f:(fun (T context as key : _ Context.packed) ->
          let attribute =
            Attribute.declare ("template." ^ name) (Context.to_ppxlib context) pattern k
          in
          key, (T (context, attribute) : _ With_attribute(Context)(Attribute).t)))
-  ;;
-
-  let find_exn
-    (type a w b)
-    (t : (w Packed(Context).t, (w, b) With_attribute(Context)(Attribute).t) Map_poly.t)
-    (ctx : (a, w) Context.t)
-    : (a, b) Attribute.t
-    =
-    let (T (ctx', attribute)) = Map_poly.find_exn t (T ctx) in
-    let Equal = Context.same_witness_exn ctx ctx' in
-    attribute
   ;;
 end
 
@@ -158,6 +97,8 @@ module Context = struct
     | Include_infos :
         ((module_expr, module_type) Either.t include_infos, [> `include_infos ]) t
 
+  type 'w packed = T : (_, 'w) t -> 'w packed [@@unboxed]
+
   type 'a poly =
     ( 'a
       , [ `value_binding
@@ -171,9 +112,7 @@ module Context = struct
       t
 
   type 'a mono = ('a, [ `expression | `module_expr | `core_type | `module_type ]) t
-
-  type 'a zero_alloc_if_local =
-    ('a, [ `expression | `value_binding | `value_description ]) t
+  type 'a zero_alloc_if = ('a, [ `expression | `value_binding | `value_description ]) t
 
   let to_ppxlib : type a w. (a, w) t -> a Attribute.Context.t = function
     | Expression -> Expression
@@ -189,7 +128,7 @@ module Context = struct
     | Include_infos -> Include_infos
   ;;
 
-  let same_witness_exn (type a b w) (a : (a, w) t) (b : (b, w) t) : (a, b) Type.eq =
+  let same_witness_exn (type a b w) (a : (a, w) t) (b : (b, w) t) : (a, b) Stdlib.Type.eq =
     match a, b with
     | Expression, Expression -> Equal
     | Module_expr, Module_expr -> Equal
@@ -328,14 +267,16 @@ end
 
 include Make (Attribute) (Context)
 
-let consume_attr attr ctx ast = Attribute.consume (find_exn attr ctx) ast
+let consume_attr attr ctx ast = Attribute.consume (Attribute_map.find_exn attr ctx) ast
 
 type ('w, 'b) t = { f : 'a. ('a, 'w) Context.t -> 'a -> 'a * 'b } [@@unboxed]
 
 let consume t ctx item = t.f ctx item
 
 module Poly = struct
-  let contexts : _ Packed(Context).t list =
+  type t = Poly : 'mangle Type.t * ('a, 'mangle) Binding.t list -> t
+
+  let contexts : _ Context.packed list =
     [ T Value_binding
     ; T Value_description
     ; T Module_binding
@@ -346,152 +287,252 @@ module Poly = struct
     ]
   ;;
 
-  let declare
-    (type id binding node)
-    (id : id Identifier.t)
-    (binding : (binding, id, node) Binding.t)
-    ~name
-    =
-    declare
-      ~name
-      ~contexts
-      ~pattern:(binding_poly_pattern id binding)
-      ~k:(Bindings.create id binding)
+  let basic_pattern type_ expression_pat =
+    Ast_pattern_helpers.binding_poly
+      ~pattern_pat:(Ast_pattern_helpers.ident_pattern type_)
+      ~expression_pat
+      ~mangle:(fun value -> value)
   ;;
 
-  let kind_attr = declare Identifier.kind Binding.kind ~name:"kind"
-  let mode_attr = declare Identifier.mode Binding.mode ~name:"mode"
-  let modality_attr = declare Identifier.modality Binding.modality ~name:"modality"
+  let declare_basic type_ expr_pat ~name =
+    declare ~name ~contexts ~pattern:(basic_pattern type_ expr_pat) ~k:Fn.id
+  ;;
 
-  type t =
-    { kinds : Bindings.M(Identifier.Kind)(Binding.Kind).t option
-    ; modes : Bindings.M(Identifier.Mode)(Binding.Mode).t option
-    ; modalities : Bindings.M(Identifier.Modality)(Binding.Modality).t option
-    }
+  let kind_attr = declare_basic Type.kind Ast_pattern_helpers.kind_expr ~name:"kind"
+
+  let mode_attr =
+    declare_basic Type.mode (Ast_pattern_helpers.ident_expr Type.mode) ~name:"mode"
+  ;;
+
+  let modality_attr =
+    declare_basic
+      Type.modality
+      (Ast_pattern_helpers.ident_expr Type.modality)
+      ~name:"modality"
+  ;;
+
+  let alloc_attr =
+    declare
+      ~name:"alloc"
+      ~contexts
+      ~pattern:
+        (Ast_pattern_helpers.binding_poly
+           ~pattern_pat:Ast_pattern_helpers.alloc_pattern
+           ~expression_pat:(Ast_pattern_helpers.ident_expr Type.(tuple2 alloc mode))
+           ~mangle:(fun (Tuple2 (alloc, _)) -> alloc))
+      ~k:Fn.id
+  ;;
+
+  let find_all_dups (type a) list ~compare =
+    let module Set =
+      Set.Make (struct
+        type t = a
+
+        let compare = compare
+      end)
+    in
+    let _, dups =
+      List.fold_left list ~init:(Set.empty, Set.empty) ~f:(fun (seen, dups) elt ->
+        if Set.mem elt dups
+        then seen, dups
+        else if Set.mem elt seen
+        then seen, Set.add elt dups
+        else Set.add elt seen, dups)
+    in
+    Set.to_list dups
+  ;;
+
+  let validate (Poly (_, bindings)) =
+    let duplicate_expression_errors =
+      List.filter_map bindings ~f:(fun { pattern; expressions; _ } ->
+        match find_all_dups expressions ~compare:Expression.compare with
+        | [] -> None
+        | dups ->
+          Some
+            (Sexp.message
+               "duplicate expressions for single pattern"
+               [ ( ""
+                 , List
+                     [ Pattern.sexp_of_t pattern; sexp_of_list Expression.sexp_of_t dups ]
+                 )
+               ]))
+    in
+    let duplicate_pattern_errors =
+      match
+        find_all_dups
+          bindings
+          ~compare:(fun { pattern = pat1; _ } { pattern = pat2; _ } ->
+            Pattern.compare pat1 pat2)
+      with
+      | [] -> []
+      | dups ->
+        let pats = List.map dups ~f:(fun { pattern; _ } -> Pattern.sexp_of_t pattern) in
+        [ Sexp.message "duplicate patterns" [ "", List pats ] ]
+    in
+    match duplicate_expression_errors @ duplicate_pattern_errors with
+    | [] -> Ok ()
+    | [ error ] -> Error error
+    | errors -> Error (List errors)
+  ;;
 end
 
 let consume_poly ctx item =
-  let consume attr item ~k =
+  let consume type_ attr item =
     match consume_attr attr ctx item with
-    | None -> k item None
-    | Some (item, Ok kind) -> k item (Some kind)
-    | Some (item, (Error _ as err)) -> item, err
+    | None -> item, []
+    | Some (item, bindings) -> item, [ Poly.Poly (type_, bindings) ]
   in
-  consume Poly.kind_attr item ~k:(fun item kinds ->
-    consume Poly.mode_attr item ~k:(fun item modes ->
-      consume Poly.modality_attr item ~k:(fun item modalities ->
-        item, Ok ({ kinds; modes; modalities } : Poly.t))))
+  let item, kinds = consume Type.kind Poly.kind_attr item in
+  let item, modes = consume Type.mode Poly.mode_attr item in
+  let item, modalities = consume Type.modality Poly.modality_attr item in
+  let item, allocs = consume Type.alloc Poly.alloc_attr item in
+  let polys = kinds @ modes @ modalities @ allocs in
+  let polys_res =
+    polys
+    |> List.map ~f:Poly.validate
+    |> List.filter_map ~f:(function
+      | Ok () -> None
+      | Error err -> Some err)
+    |> function
+    | [] -> Ok polys
+    | [ err ] -> Error err
+    | errs -> Error (List errs)
+  in
+  item, polys_res
 ;;
 
 let poly = { f = consume_poly }
 
 module Mono = struct
-  let contexts : _ Packed(Context).t list =
+  type t = Expression.Basic.packed list Type.Map.t
+
+  let contexts : _ Context.packed list =
     [ T Expression; T Module_expr; T Core_type; T Module_type ]
   ;;
 
-  let declare binding ~name =
-    declare ~name ~contexts ~pattern:(binding_mono_pattern binding) ~k:Fn.id
+  let declare expr_pat ~name =
+    declare ~name ~contexts ~pattern:(Ast_pattern_helpers.binding_mono expr_pat) ~k:Fn.id
   ;;
 
-  let kind_attr = declare Binding.kind ~name:"kind"
-  let mode_attr = declare Binding.mode ~name:"mode"
-  let modality_attr = declare Binding.modality ~name:"modality"
+  let kind_attr = declare Ast_pattern_helpers.kind_expr ~name:"kind"
+  let mode_attr = declare (Ast_pattern_helpers.ident_expr Type.mode) ~name:"mode"
 
-  type t =
-    { kinds : Binding.Kind.t list
-    ; modes : Binding.Mode.t list
-    ; modalities : Binding.Modality.t list
-    }
+  let modality_attr =
+    declare (Ast_pattern_helpers.ident_expr Type.modality) ~name:"modality"
+  ;;
+
+  let alloc_attr = declare (Ast_pattern_helpers.ident_expr Type.alloc) ~name:"alloc"
 end
 
 let consume_mono ctx item =
-  let consume attr item =
+  let consume mono type_ attr item =
     match consume_attr attr ctx item with
-    | None -> item, []
-    | Some (item, vals) -> item, vals
+    | None -> item, mono
+    | Some (item, vals) -> item, Type.Map.add (P type_) vals mono
   in
-  let item, kinds = consume Mono.kind_attr item in
-  let item, modes = consume Mono.mode_attr item in
-  let item, modalities = consume Mono.modality_attr item in
-  item, ({ kinds; modes; modalities } : Mono.t)
+  let mono = Type.Map.empty in
+  let item, mono = consume mono Type.kind Mono.kind_attr item in
+  let item, mono = consume mono Type.mode Mono.mode_attr item in
+  let item, mono = consume mono Type.modality Mono.modality_attr item in
+  let item, mono = consume mono Type.alloc Mono.alloc_attr item in
+  item, mono
 ;;
 
 let mono = { f = consume_mono }
 
-module Exclave_if_local = struct
-  let attr =
+let consume_attr_if attr =
+  { f =
+      (fun ctx item ->
+        match consume_attr attr ctx item with
+        | None -> item, None
+        | Some (item, expr) -> item, Some expr)
+  }
+;;
+
+module Exclave_if = struct
+  let declare ~name ~type_ =
     declare
-      ~name:"exclave_if_local"
+      ~name
       ~contexts:[ T Expression ]
-      ~pattern:(Ast_pattern.single_expr_payload (ident Identifier.mode))
+      ~pattern:
+        (Ast_pattern.single_expr_payload ((Ast_pattern_helpers.ident_expr type_).pat ())
+         |> Ast_pattern.map1' ~f:(fun loc mode -> mode, loc))
       ~k:Fn.id
   ;;
+
+  let local_attr = declare ~name:"exclave_if_local" ~type_:Type.mode
+  let stack_attr = declare ~name:"exclave_if_stack" ~type_:Type.alloc
 end
 
-let consume_attr_if_local attr ctx item =
-  match consume_attr attr ctx item with
-  | None -> item, None
-  | Some (item, mode) -> item, Some mode
-;;
+let exclave_if_local = consume_attr_if Exclave_if.local_attr
+let exclave_if_stack = consume_attr_if Exclave_if.stack_attr
 
-let exclave_if_local =
-  { f = (fun ctx item -> consume_attr_if_local Exclave_if_local.attr ctx item) }
-;;
-
-module Zero_alloc_if_local = struct
-  let pattern =
+module Zero_alloc_if = struct
+  let pattern type_ =
     let open Ast_pattern in
     single_expr_payload
-      (map (ident Identifier.mode) ~f:(fun k mode -> k mode [])
-       ||| pexp_apply (ident Identifier.mode) (many (pair nolabel __)))
+      (map ((Ast_pattern_helpers.ident_expr type_).pat ()) ~f:(fun k mode -> k mode [])
+       ||| pexp_apply
+             ((Ast_pattern_helpers.ident_expr type_).pat ())
+             (many (pair nolabel __)))
     |> map2' ~f:(fun loc mode payload -> loc, mode, payload)
   ;;
 
-  let attr =
+  let declare ~name ~type_ =
     declare
-      ~name:"zero_alloc_if_local"
+      ~name
       ~contexts:[ T Expression; T Value_binding; T Value_description ]
-      ~pattern
+      ~pattern:(pattern type_)
       ~k:Fn.id
   ;;
+
+  let local_attr = declare ~name:"zero_alloc_if_local" ~type_:Type.mode
+  let stack_attr = declare ~name:"zero_alloc_if_stack" ~type_:Type.alloc
 end
 
-let zero_alloc_if_local =
-  { f = (fun ctx item -> consume_attr_if_local Zero_alloc_if_local.attr ctx item) }
-;;
+let zero_alloc_if_local = consume_attr_if Zero_alloc_if.local_attr
+let zero_alloc_if_stack = consume_attr_if Zero_alloc_if.stack_attr
 
 module Conflate = struct
-  let attr contexts identifier name =
-    let pat () =
-      ident identifier |> Ast_pattern.map1' ~f:(fun loc x -> Loc.make ~loc x)
-    in
+  let attr contexts type_from type_to name =
     declare
       ~name:("conflate_" ^ name)
       ~contexts
-      ~pattern:(one_or_many_as_list { pat } |> Ast_pattern.single_expr_payload)
+      ~pattern:
+        (type_from
+         |> Ast_pattern_helpers.ident
+         |> Ast_pattern_helpers.one_or_many_as_list
+         |> Ast_pattern.single_expr_payload
+         |> Ast_pattern.map1 ~f:(fun idents ->
+           List.map idents ~f:(fun (ident : _ Identifier.t) ->
+             Conflation.P
+               { existing_identifier = ident
+               ; new_identifier = { ident = ident.ident; type_ = type_to }
+               })))
       ~k:Fn.id
   ;;
 
-  let mono_modes = attr Mono.contexts Identifier.mode "mode_as_modality"
-  let mono_modalities = attr Mono.contexts Identifier.modality "modality_as_mode"
-  let poly_modes = attr Poly.contexts Identifier.mode "mode_as_modality"
-  let poly_modalities = attr Poly.contexts Identifier.modality "modality_as_mode"
+  let mono_modes = attr Mono.contexts Type.mode Type.modality "mode_as_modality"
+  let mono_modalities = attr Mono.contexts Type.modality Type.mode "modality_as_mode"
+  let poly_modes = attr Poly.contexts Type.mode Type.modality "mode_as_modality"
+  let poly_modalities = attr Poly.contexts Type.modality Type.mode "modality_as_mode"
 end
 
-let make_conflate attr =
+let make_conflate attrs =
   let consume ctx item =
-    match consume_attr attr ctx item with
-    | None -> item, []
-    | Some (item, modes) -> item, modes
+    let item, conflations =
+      List.fold_left_map attrs ~init:item ~f:(fun item attr ->
+        match consume_attr attr ctx item with
+        | None -> item, []
+        | Some (item, conflations) -> item, conflations)
+    in
+    item, List.concat conflations
   in
   { f = consume }
 ;;
 
-let conflate_mono_modes = make_conflate Conflate.mono_modes
-let conflate_mono_modalities = make_conflate Conflate.mono_modalities
-let conflate_poly_modes = make_conflate Conflate.poly_modes
-let conflate_poly_modalities = make_conflate Conflate.poly_modalities
+let conflate_mono = make_conflate [ Conflate.mono_modes; Conflate.mono_modalities ]
+let conflate_poly = make_conflate [ Conflate.poly_modes; Conflate.poly_modalities ]
 
 module Floating = struct
   module Context = struct
@@ -499,6 +540,7 @@ module Floating = struct
       | Structure_item : (structure_item, [> `structure_item ]) t
       | Signature_item : (signature_item, [> `signature_item ]) t
 
+    type 'w packed = T : (_, 'w) t -> 'w packed [@@unboxed]
     type 'a poly = ('a, [ `structure_item | `signature_item ]) t
 
     let to_ppxlib : type a w. (a, w) t -> a Attribute.Floating.Context.t = function
@@ -506,7 +548,9 @@ module Floating = struct
       | Signature_item -> Signature_item
     ;;
 
-    let same_witness_exn (type a b w) (a : (a, w) t) (b : (b, w) t) : (a, b) Type.eq =
+    let same_witness_exn (type a b w) (a : (a, w) t) (b : (b, w) t)
+      : (a, b) Stdlib.Type.eq
+      =
       match a, b with
       | Structure_item, Structure_item -> Equal
       | Signature_item, Signature_item -> Equal
@@ -517,60 +561,61 @@ module Floating = struct
   include Make (Attribute.Floating) (Context)
 
   let convert_attrs attrs ctx ast =
-    Attribute.Floating.convert (List.map attrs ~f:(fun attr -> find_exn attr ctx)) ast
+    Attribute.Floating.convert
+      (List.map attrs ~f:(fun attr -> Attribute_map.find_exn attr ctx))
+      ast
   ;;
+
+  module Attached_poly = Poly
 
   module Poly = struct
-    module Bindings = struct
-      type t =
-        | Kinds of Bindings.M(Identifier.Kind)(Binding.Kind).t
-        | Modes of Bindings.M(Identifier.Mode)(Binding.Mode).t
-        | Modalities of Bindings.M(Identifier.Modality)(Binding.Modality).t
-
-      let kinds b = Kinds b
-      let modes b = Modes b
-      let modalities b = Modalities b
-    end
-
     type t =
-      { bindings : Bindings.t
+      { bindings : Attached_poly.t
       ; default : bool
       }
+
+    let validate t = Attached_poly.validate t.bindings
   end
 
-  let declare_poly
-    (type id binding node)
-    (poly : (id, binding) Bindings.t -> Poly.Bindings.t)
-    (id : id Identifier.t)
-    (binding : (binding, id, node) Binding.t)
-    ~name
-    =
+  let contexts : _ Context.packed list = [ T Structure_item; T Signature_item ]
+
+  let declare_poly ~name ~type_ ~pattern =
     List.map [ false; true ] ~f:(fun default ->
       let name = if default then name ^ ".default" else name in
-      declare
-        ~name
-        ~contexts:[ T Structure_item; T Signature_item ]
-        ~pattern:(binding_poly_pattern id binding)
-        ~k:(fun binds ->
-          Result.map (Bindings.create id binding binds) ~f:(fun bindings : Poly.t ->
-            { bindings = poly bindings; default })))
+      declare ~name ~contexts ~pattern ~k:(fun bindings ->
+        { Poly.bindings = Poly (type_, bindings); default }))
   ;;
 
-  let kind_poly =
-    declare_poly Poly.Bindings.kinds Identifier.kind Binding.kind ~name:"kind"
+  let declare_basic type_ expr_pat ~name =
+    declare_poly ~name ~type_ ~pattern:(Attached_poly.basic_pattern type_ expr_pat)
   ;;
+
+  let kind_poly = declare_basic Type.kind Ast_pattern_helpers.kind_expr ~name:"kind"
 
   let mode_poly =
-    declare_poly Poly.Bindings.modes Identifier.mode Binding.mode ~name:"mode"
+    declare_basic Type.mode (Ast_pattern_helpers.ident_expr Type.mode) ~name:"mode"
   ;;
 
   let modality_poly =
-    declare_poly
-      Poly.Bindings.modalities
-      Identifier.modality
-      Binding.modality
+    declare_basic
+      Type.modality
+      (Ast_pattern_helpers.ident_expr Type.modality)
       ~name:"modality"
   ;;
 
-  let convert_poly ctx ast = convert_attrs (kind_poly @ mode_poly @ modality_poly) ctx ast
+  let alloc_poly =
+    declare_poly
+      ~name:"alloc"
+      ~type_:Type.alloc
+      ~pattern:
+        (Ast_pattern_helpers.binding_poly
+           ~pattern_pat:Ast_pattern_helpers.alloc_pattern
+           ~expression_pat:(Ast_pattern_helpers.ident_expr Type.(tuple2 alloc mode))
+           ~mangle:(fun (Tuple2 (alloc, _)) -> alloc))
+  ;;
+
+  let convert_poly ctx ast =
+    convert_attrs (kind_poly @ mode_poly @ modality_poly @ alloc_poly) ctx ast
+    |> Option.map ~f:(fun poly -> poly |> Poly.validate |> Result.map ~f:(fun () -> poly))
+  ;;
 end
