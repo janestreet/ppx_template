@@ -13,6 +13,7 @@ include struct
   end
 
   module Attribute = Attribute
+  module Context_free = Context_free
   module Driver = Driver
   module Extension = Extension
   module Loc = Loc

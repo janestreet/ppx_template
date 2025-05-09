@@ -1,11 +1,7 @@
 open! Core
 
 (* Normal compiler error for unknown layout. *)
-module _ : sig
-  val%template id : ('a : x). 'a -> 'a
-end = struct
-  let%template id (type a : x) (x : a) : a = x
-end
+let%template id (type a : x) (x : a) : a = x
 
 [%%expect
   {|
@@ -13,17 +9,44 @@ Line _, characters _-_:
 Error: Unknown layout x
 |}]
 
-(* Normal compiler error for unknown layout, in the presence of [@@kind]. *)
+(* Normal compiler error for unknown layout bound by [ppx_template]. *)
+let%template id (type a : foo) (x : a) : a = x [@@kind foo = bar]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unknown layout bar
+|}]
+
+(* Normal compiler error for unknown mode bound by [ppx_template]. *)
+let%template id (x @ foo) = x [@@mode foo = bar]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unrecognized mode bar.
+|}]
+
+(* Normal compiler error for unknown modality bound by [ppx_template]. *)
 module _ : sig
-  val%template id : ('a : x). 'a -> 'a [@@kind foo = bar]
+  val%template id : 'a -> 'a @@ foo [@@modality foo = bar]
 end = struct
-  let%template id (type a : x) (x : a) : a = x [@@kind foo = bar]
+  let%template id x = x [@@mode foo = bar]
 end
 
 [%%expect
   {|
 Line _, characters _-_:
-Error: Unknown layout x
+Error: Unrecognized modality bar.
+|}]
+
+(* [ppx_template] error for unbound identifier for non-basic types *)
+let%template x = () [@@alloc a @ m = bar]
+
+[%%expect
+  {|
+Line _:
+Error: Unbound template identifier bar.
 |}]
 
 (* Duplicate jkinds for single kind variable (signature). *)
@@ -36,7 +59,7 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate bindings for single identifier" (x (value))))
+Error: ([%template] ("duplicate expressions for single pattern" (x (value))))
 |}]
 
 (* Duplicate jkinds for single kind variable (structure). *)
@@ -47,7 +70,7 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate bindings for single identifier" (x (value))))
+Error: ([%template] ("duplicate expressions for single pattern" (x (value))))
 |}]
 
 (* Duplicate jkinds for single kind variable (expression). *)
@@ -59,7 +82,7 @@ let () =
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate bindings for single identifier" (x (value))))
+Error: ([%template] ("duplicate expressions for single pattern" (x (value))))
 |}]
 
 (* Duplicate jkinds for single kind variable (module declaration). *)
@@ -70,7 +93,7 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate bindings for single identifier" (x (value))))
+Error: ([%template] ("duplicate expressions for single pattern" (x (value))))
 |}]
 
 (* Duplicate jkinds for single kind variable (module expression). *)
@@ -79,7 +102,7 @@ module%template _ = struct end [@@kind x = (value, value)]
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate bindings for single identifier" (x (value))))
+Error: ([%template] ("duplicate expressions for single pattern" (x (value))))
 |}]
 
 (* Duplicate kind variables (signature). *)
@@ -92,7 +115,7 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate identifiers" (x)))
+Error: ([%template] ("duplicate patterns" (x)))
 |}]
 
 (* Duplicate kind variables (structure). *)
@@ -103,7 +126,7 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate identifiers" (x)))
+Error: ([%template] ("duplicate patterns" (x)))
 |}]
 
 (* Duplicate kind variables (expression). *)
@@ -115,7 +138,7 @@ let () =
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate identifiers" (x)))
+Error: ([%template] ("duplicate patterns" (x)))
 |}]
 
 (* Duplicate kind variables (module declaration). *)
@@ -126,7 +149,7 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate identifiers" (x)))
+Error: ([%template] ("duplicate patterns" (x)))
 |}]
 
 (* Duplicate kind variables (module expression). *)
@@ -135,7 +158,29 @@ module%template _ = struct end [@@kind x = value, x = value]
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate identifiers" (x)))
+Error: ([%template] ("duplicate patterns" (x)))
+|}]
+
+(* Check error printing of more complicated kind expressions. *)
+module%template _ = struct
+  let f x = x
+  [@@kind
+    k
+    = ( (value mod portable) & (value mod contended)
+      , (value mod portable) & (value mod contended)
+      , (value & bits32) mod portable contended
+      , (value & bits32) mod portable contended )]
+  ;;
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("duplicate expressions for single pattern"
+         (k
+          ((Product (Mod value (portable)) (Mod value (contended)))
+           (Mod (Product value bits32) (contended portable))))))
 |}]
 
 (* Missing [@kind: l] on recursive call. *)
@@ -162,11 +207,11 @@ Error: Signature mismatch:
        The type n:int -> ('a -> 'a) -> 'a -> 'a
        is not compatible with the type n:int -> ('b -> 'b) -> 'b -> 'b
        The layout of 'a is float64
-         because of the definition of apply_n_times__float64 at file "test.mlt", lines 143-144, characters 2-31.
+         because of the definition of apply_n_times__float64 at file "test.mlt", lines 188-189, characters 2-31.
        But the layout of 'a must be a sublayout of value
-         because of the definition of apply_n_times__float64 at file "test.mlt", lines 146-147, characters 33-58.
-       File "test.mlt", lines 143-144, characters 2-31: Expected declaration
-       File "test.mlt", line 146, characters 19-32: Actual declaration
+         because of the definition of apply_n_times__float64 at file "test.mlt", lines 191-192, characters 33-58.
+       File "test.mlt", lines 188-189, characters 2-31: Expected declaration
+       File "test.mlt", line 191, characters 19-32: Actual declaration
 |}]
 
 (* Missing [@kind: l] on recursive call (as above, but with a newtype expression). *)
@@ -253,7 +298,8 @@ end
   {|
 Line _, characters _-_:
 Error: ([%template]
-        ("duplicate bindings for single identifier" (x ('value_bits32'))))
+        ("duplicate expressions for single pattern" (x ((Product value
+       bits32)))))
 |}]
 
 (* Demonstrate error message for incorrect [@exclave_if_local] usage. *)
@@ -353,7 +399,7 @@ let%template[@mode repeat = local, repeat = global] x = (x [@dropped])
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate identifiers" (repeat)))
+Error: ([%template] ("duplicate patterns" (repeat)))
 |}]
 
   type%template t : k [@@kind k = ((value mod portable) & value)]
@@ -421,4 +467,110 @@ module%template.portable [@modality m = (portable, nonportable)] F = struct end
   {|
 Line _, characters _-_:
 Error: ident expected
+|}]
+
+(* Error messages for mono-attributes in invalid positions *)
+
+let%template apply f x = f x [@kind]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [%template]: don't know how to mangle this expression (suffix: )
+|}]
+
+let%template apply f x = f x [@kind value value]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [%template]: don't know how to mangle this expression (suffix: )
+|}]
+
+let%template apply f x = f x [@kind bits32]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [%template]: don't know how to mangle this expression (suffix: bits32)
+|}]
+
+(* Error messages for unbound identifiers in [exclave_if*] and [zero_alloc_if*] attributes *)
+
+let%template f x = x [@exclave_if_local foo]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unknown or invalid mode identifier: foo
+|}]
+
+let%template[@mode foo = unique] f x = x [@exclave_if_local foo]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unknown or invalid mode identifier: unique
+|}]
+
+let%template f x = x [@exclave_if_stack foo]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound allocation identifier: foo
+|}]
+
+let%template f x = x [@@zero_alloc_if_local foo]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unknown or invalid mode identifier: foo
+|}]
+
+let%template[@mode foo = unique] f x = x [@@zero_alloc_if_local unique]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unknown or invalid mode identifier: unique
+|}]
+
+let%template f x = x [@@zero_alloc_if_stack foo]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound allocation identifier: foo
+|}]
+
+module type T = sig
+  val%template f : int -> int [@@zero_alloc_if_local foo]
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unknown or invalid mode identifier: foo
+|}]
+
+module type T = sig
+  val%template f : int -> int [@@mode foo = unique] [@@zero_alloc_if_local foo]
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unknown or invalid mode identifier: unique
+|}]
+
+module type T = sig
+  val%template f : int -> int [@@zero_alloc_if_stack foo]
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound allocation identifier: foo
 |}]

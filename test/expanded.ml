@@ -344,3 +344,19 @@ include struct
 end
 
 [@@@end]
+
+[@@@expand_inline
+  let x = {| [exclave_] is not inserted multiple times |}
+
+  let%template id x = x [@exclave_if_local n] [@exclave_if_stack a]
+  [@@alloc a @ m = (heap, stack)] [@@mode n = (local, global)]
+  ;;]
+
+let x = {| [exclave_] is not inserted multiple times |}
+
+let id__local x = exclave_ x
+and id__local__stack x = exclave_ x
+and id x = x
+and id__stack x = exclave_ x
+
+[@@@end]

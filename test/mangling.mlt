@@ -64,3 +64,16 @@ module M__contended__local__nonportable :
 module M__contended__local__portable :
   sig type 'a t = { x : 'a @@ portable contended; } end
 |}]
+
+open%template struct
+  [@@@mode.default m = local]
+
+  let mangle = 1
+  let[@mode] no_mangle = (mangle [@mode m])
+end
+
+[%%expect
+  {|
+val mangle__local : int = 1
+val no_mangle : int = 1
+|}]
