@@ -15,28 +15,12 @@ module Context = struct
     ; defaults : Defaults.t
     }
 
-  let initial_env : Env.t =
-    [ Entry
-        ( { ident = "heap"; type_ = Type.(tuple2 alloc mode) }
-        , Tuple2
-            ( Identifier { ident = "heap"; type_ = Type.alloc }
-            , Identifier { ident = "global"; type_ = Type.mode } ) )
-    ; Entry
-        ( { ident = "stack"; type_ = Type.(tuple2 alloc mode) }
-        , Tuple2
-            ( Identifier { ident = "stack"; type_ = Type.alloc }
-            , Identifier { ident = "local"; type_ = Type.mode } ) )
-    ]
-  ;;
-
-  let top = { ghostify = false; env = initial_env; defaults = Defaults.empty }
+  let top = { ghostify = false; env = Language.Env.initial; defaults = Defaults.empty }
 end
 
 let extract_bindings (type a) (ctx : a Attributes.Context.poly) node =
   match Attributes.consume Attributes.poly ctx node with
-  | node, Ok bindings ->
-    let node, conflations = Attributes.consume Attributes.conflate_poly ctx node in
-    Ok (node, bindings, conflations)
+  | node, Ok bindings -> Ok (node, bindings)
   | node, Error err ->
     let loc, attrs =
       match ctx with
@@ -74,7 +58,7 @@ let stable_dedup list ~compare =
 let handle_one_binding ~original_env envs ({ pattern; expressions; mangle } : _ Binding.t)
   =
   List.concat_map envs ~f:(fun (env, manglers) ->
-    List.map expressions ~f:(Env.eval original_env)
+    List.map expressions ~f:(fun expr -> Env.eval original_env expr)
     (* If multiple expressions evaluate to the same value, only generate one instance. *)
     |> stable_dedup ~compare:Value.compare
     |> List.map ~f:(fun value ->
@@ -119,7 +103,7 @@ let consume_poly
   List.map nodes ~f:(fun node ->
     match extract_bindings attr_ctx node with
     | Error _ as err -> err
-    | Ok (node, polys, conflations) ->
+    | Ok (node, polys) ->
       let instances =
         List.map (instantiate polys ~env) ~f:(fun (env, manglers) ->
           (* Use current default manglers when axis is unspecified. *)
@@ -133,8 +117,6 @@ let consume_poly
               defaults
               manglers
           in
-          (* Conflate axes as requested by user *)
-          let env = Env.conflate env conflations in
           (* Associate node with the instance *)
           node, env, manglers)
       in
@@ -239,20 +221,22 @@ let error_to_string_hum ~loc err explicitly_drop_method node =
     (Sexp.to_string_hum (Sexp.message "[%template]" [ "", err ]))
 ;;
 
-let is_local ~loc ~(mode : Type.mode Expression.t) ~env =
+let is_local (mode : Type.mode Expression.t Loc.t) ~env =
   let (Identifier ident) = Env.eval env mode in
   match ident.ident with
   | "local" -> true
   | "global" -> false
-  | ident -> Location.raise_errorf ~loc "Unknown or invalid mode identifier: %s" ident
+  | ident ->
+    Location.raise_errorf ~loc:mode.loc "Unknown or invalid mode identifier: %s" ident
 ;;
 
-let is_stack ~loc ~(alloc : Type.alloc Expression.t) ~env =
+let is_stack (alloc : Type.alloc Expression.t Loc.t) ~env =
   let (Identifier ident) = Env.eval env alloc in
   match ident.ident with
   | "stack" -> true
   | "heap" -> false
-  | ident -> Location.raise_errorf ~loc "Unbound allocation identifier: %s" ident
+  | ident ->
+    Location.raise_errorf ~loc:alloc.loc "Unbound allocation identifier: %s" ident
 ;;
 
 let consume_zero_alloc_if
@@ -269,8 +253,8 @@ let consume_zero_alloc_if
   in
   let add_zero_alloc =
     match zero_alloc_if_local, zero_alloc_if_stack with
-    | Some (loc, mode, payload), _ when is_local ~loc ~mode ~env -> Some (loc, payload)
-    | _, Some (loc, alloc, payload) when is_stack ~loc ~alloc ~env -> Some (loc, payload)
+    | Some (loc, mode, payload), _ when is_local mode ~env -> Some (loc, payload)
+    | _, Some (loc, alloc, payload) when is_stack alloc ~env -> Some (loc, payload)
     | _, _ -> None
   in
   match add_zero_alloc with
@@ -309,9 +293,15 @@ let t =
            let (Jkind_annotation kind) = Value.to_node ~loc:pjkind_loc kind in
            kind)
       | Mod (base, modifiers) ->
-        (* We explicitly do not want to recur into the [modifiers] here, as jkind
-           modifiers are currently represented as [modes] in the parsetree, but their
-           representation may change in a non-backwards-compatible way in the future. *)
+        (* Even though [modifiers] is represented as a list of [mode]s, they conceptually
+           act more like modalities. *)
+        let modifiers =
+          List.map modifiers ~f:(fun { txt = Mode name; loc } ->
+            { txt = Ppxlib_jane.Modality name; loc })
+          |> self#modalities ctx
+          |> List.map ~f:(fun { txt = Modality name; loc } ->
+            { txt = Ppxlib_jane.Mode name; loc })
+        in
         { pjkind_loc = self#location ctx pjkind_loc
         ; pjkind_desc = Mod (self#jkind_annotation ctx base, modifiers)
         }
@@ -346,10 +336,6 @@ let t =
            call the superclass method, or else we loop infinitely, and [super] can't be
            passed around as a value (it can only be used directly with a method call). *)
         let node, mangle_exprs = Attributes.consume Attributes.mono attr_ctx node in
-        let node, conflations =
-          Attributes.consume Attributes.conflate_mono attr_ctx node
-        in
-        let ctx = { ctx with env = Env.conflate ctx.env conflations } in
         let node = Mangle.mangle attr_ctx node mangle_exprs ~env:ctx.env in
         match attr_ctx with
         | Expression -> super#expression ctx node
@@ -371,9 +357,8 @@ let t =
           Attributes.consume Attributes.exclave_if_local Expression expr
         in
         match exclave_because_stack, exclave_because_local with
-        | Some (alloc, alloc_loc), _ when is_stack ~loc:alloc_loc ~alloc ~env:ctx.env ->
-          [%expr [%e expr]]
-        | _, Some (mode, mode_loc) ->
+        | Some alloc, _ when is_stack alloc ~env:ctx.env -> [%expr [%e expr]]
+        | _, Some mode ->
           let rec is_ident_or_field_or_constant = function
             | { pexp_desc = Pexp_ident _ | Pexp_constant _ | Pexp_construct (_, None); _ }
               -> true
@@ -407,8 +392,7 @@ let t =
             | _ -> is_pure_allocation expr
           in
           if is_allowable
-          then
-            if is_local ~loc:mode_loc ~mode ~env:ctx.env then [%expr [%e expr]] else expr
+          then if is_local mode ~env:ctx.env then [%expr [%e expr]] else expr
           else
             (* Ideally this check is conservative, which seems fine for now. *)
             Ast_builder.pexp_extension

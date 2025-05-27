@@ -11,7 +11,10 @@ let rec mangle_value : type a. a Type.basic Value.t -> string =
     | Identifier ident -> ident.ident
     | Kind_product kinds -> List.map kinds ~f:mangle_value |> group
     | Kind_mod (kind, modifiers) ->
-      mangle_value kind :: "mod" :: String.Set.to_list modifiers |> group
+      mangle_value kind
+      :: "mod"
+      :: (List.map modifiers ~f:mangle_value |> List.sort_uniq ~cmp:String.compare)
+      |> group
 ;;
 
 let concat_with_underscores = String.concat ~sep:"__"
@@ -21,11 +24,16 @@ let concat_with_underscores = String.concat ~sep:"__"
 let is_default : type a. a Type.basic Value.t -> bool =
   fun value ->
   match Value.type_ value, value with
-  | Basic Kind, Identifier { ident = "value"; _ } -> true
+  | Basic Kind, Identifier { ident = "value" | "value_or_null"; _ } -> true
   | Basic Kind, _ -> false
-  | Basic Mode, Identifier { ident = "global" | "nonportable" | "uncontended"; _ } -> true
+  | ( Basic Mode
+    , Identifier
+        { ident = "global" | "nonportable" | "uncontended" | "aliased" | "many"; _ } ) ->
+    true
   | Basic Mode, _ -> false
-  | Basic Modality, Identifier { ident = "local" | "nonportable" | "uncontended"; _ } ->
+  | ( Basic Modality
+    , Identifier
+        { ident = "local" | "nonportable" | "uncontended" | "unique" | "once"; _ } ) ->
     true
   | Basic Modality, _ -> false
   | Basic Alloc, Identifier { ident = "heap"; _ } -> true
@@ -187,8 +195,8 @@ let mangle (type a) (attr_ctx : a Attributes.Context.mono) (node : a) mangle_exp
     let manglers =
       Type.Map.map
         (fun exprs ->
-          List.map exprs ~f:(fun (Expression.Basic.P expr) ->
-            Value.Basic.P (Env.eval env expr)))
+          List.map exprs ~f:(fun { txt = Expression.Basic.P expr; loc } ->
+            Value.Basic.P (Env.eval env { txt = expr; loc })))
         mangle_exprs
     in
     let suffix = Suffix.create manglers in

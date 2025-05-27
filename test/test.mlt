@@ -45,8 +45,8 @@ let%template x = () [@@alloc a @ m = bar]
 
 [%%expect
   {|
-Line _:
-Error: Unbound template identifier bar.
+Line _, characters _-_:
+Error: Unbound template identifier [bar] of type [(Alloc @ Mode)].
 |}]
 
 (* Duplicate jkinds for single kind variable (signature). *)
@@ -518,7 +518,7 @@ let%template f x = x [@exclave_if_stack foo]
 [%%expect
   {|
 Line _, characters _-_:
-Error: Unbound allocation identifier: foo
+Error: Unbound template identifier [foo] of type [Alloc].
 |}]
 
 let%template f x = x [@@zero_alloc_if_local foo]
@@ -542,7 +542,7 @@ let%template f x = x [@@zero_alloc_if_stack foo]
 [%%expect
   {|
 Line _, characters _-_:
-Error: Unbound allocation identifier: foo
+Error: Unbound template identifier [foo] of type [Alloc].
 |}]
 
 module type T = sig
@@ -572,5 +572,69 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: Unbound allocation identifier: foo
+Error: Unbound template identifier [foo] of type [Alloc].
+|}]
+
+let%template f x = x [@@alloc a = (heap, queue)]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [queue] of type [Alloc].
+|}]
+
+(* Hints for nearby names *)
+
+let%template f x = x [@@alloc a = heap_global]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [heap_global] of type [Alloc].
+Hint: Did you mean [heap]?
+|}]
+
+let%template f x = x [@@alloc a = stack_local]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [stack_local] of type [Alloc].
+Hint: Did you mean [stack]?
+|}]
+
+let%template f x = x [@@alloc a @ m = heap]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [heap] of type [(Alloc @ Mode)].
+Hint: Did you mean [heap_global]?
+|}]
+
+let%template f x = x [@@alloc a @ m = stack]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [stack] of type [(Alloc @ Mode)].
+Hint: Did you mean [stack_local]?
+|}]
+
+let%template f x = x [@alloc heap_global]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [heap_global] of type [Alloc].
+Hint: Did you mean [heap]?
+|}]
+
+let%template f x = x [@alloc stack_local]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [stack_local] of type [Alloc].
+Hint: Did you mean [stack]?
 |}]

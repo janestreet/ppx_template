@@ -1,6 +1,7 @@
 open! Stdppx
 open! Import
 open Language
+include Attributes_intf.Definitions
 
 module type Context = sig
   type ('a, 'w) t [@@immediate]
@@ -28,7 +29,7 @@ end = struct
   module Key = struct
     type t = Poly : _ -> t
 
-    let compare = Poly.compare
+    let compare = Stdppx.Poly.compare
   end
 
   module Map = Map.Make (Key)
@@ -83,19 +84,7 @@ struct
 end
 
 module Context = struct
-  type ('a, 'w) t =
-    | Expression : (expression, [> `expression ]) t
-    | Module_expr : (module_expr, [> `module_expr ]) t
-    | Core_type : (core_type, [> `core_type ]) t
-    | Module_type : (module_type, [> `module_type ]) t
-    | Value_binding : (value_binding, [> `value_binding ]) t
-    | Value_description : (value_description, [> `value_description ]) t
-    | Module_binding : (module_binding, [> `module_binding ]) t
-    | Module_declaration : (module_declaration, [> `module_declaration ]) t
-    | Type_declaration : (type_declaration, [> `type_declaration ]) t
-    | Module_type_declaration : (module_type_declaration, [> `module_type_declaration ]) t
-    | Include_infos :
-        ((module_expr, module_type) Either.t include_infos, [> `include_infos ]) t
+  include Context
 
   type 'w packed = T : (_, 'w) t -> 'w packed [@@unboxed]
 
@@ -274,7 +263,7 @@ type ('w, 'b) t = { f : 'a. ('a, 'w) Context.t -> 'a -> 'a * 'b } [@@unboxed]
 let consume t ctx item = t.f ctx item
 
 module Poly = struct
-  type t = Poly : 'mangle Type.t * ('a, 'mangle) Binding.t list -> t
+  include Poly
 
   let contexts : _ Context.packed list =
     [ T Value_binding
@@ -292,6 +281,7 @@ module Poly = struct
       ~pattern_pat:(Ast_pattern_helpers.ident_pattern type_)
       ~expression_pat
       ~mangle:(fun value -> value)
+      ~mangle_type:type_
   ;;
 
   let declare_basic type_ expr_pat ~name =
@@ -311,16 +301,24 @@ module Poly = struct
       ~name:"modality"
   ;;
 
+  let alloc_binding_pattern () =
+    Ast_pattern.( ||| )
+      (* e.g. [[@@alloc a = (heap, stack)]] *)
+      (Ast_pattern_helpers.binding_poly
+         ~pattern_pat:(Ast_pattern_helpers.ident_pattern Type.alloc)
+         ~expression_pat:(Ast_pattern_helpers.ident_expr Type.alloc)
+         ~mangle:(fun alloc -> alloc)
+         ~mangle_type:Type.alloc)
+      (* e.g. [[@@alloc a @ m = (heap_global, stack @ local)]] *)
+      (Ast_pattern_helpers.binding_poly
+         ~pattern_pat:Ast_pattern_helpers.alloc_pattern
+         ~expression_pat:Ast_pattern_helpers.alloc_expr
+         ~mangle:(fun (Tuple2 (alloc, _)) -> alloc)
+         ~mangle_type:Type.alloc)
+  ;;
+
   let alloc_attr =
-    declare
-      ~name:"alloc"
-      ~contexts
-      ~pattern:
-        (Ast_pattern_helpers.binding_poly
-           ~pattern_pat:Ast_pattern_helpers.alloc_pattern
-           ~expression_pat:(Ast_pattern_helpers.ident_expr Type.(tuple2 alloc mode))
-           ~mangle:(fun (Tuple2 (alloc, _)) -> alloc))
-      ~k:Fn.id
+    declare ~name:"alloc" ~contexts ~pattern:(alloc_binding_pattern ()) ~k:Fn.id
   ;;
 
   let find_all_dups (type a) list ~compare =
@@ -345,7 +343,10 @@ module Poly = struct
   let validate (Poly (_, bindings)) =
     let duplicate_expression_errors =
       List.filter_map bindings ~f:(fun { pattern; expressions; _ } ->
-        match find_all_dups expressions ~compare:Expression.compare with
+        match
+          find_all_dups expressions ~compare:(fun e1 e2 ->
+            Expression.compare e1.txt e2.txt)
+        with
         | [] -> None
         | dups ->
           Some
@@ -353,8 +354,9 @@ module Poly = struct
                "duplicate expressions for single pattern"
                [ ( ""
                  , List
-                     [ Pattern.sexp_of_t pattern; sexp_of_list Expression.sexp_of_t dups ]
-                 )
+                     [ Pattern.sexp_of_t pattern
+                     ; sexp_of_list Expression.sexp_of_t (List.map ~f:Loc.txt dups)
+                     ] )
                ]))
     in
     let duplicate_pattern_errors =
@@ -377,15 +379,15 @@ module Poly = struct
 end
 
 let consume_poly ctx item =
-  let consume type_ attr item =
+  let consume attr item =
     match consume_attr attr ctx item with
     | None -> item, []
-    | Some (item, bindings) -> item, [ Poly.Poly (type_, bindings) ]
+    | Some (item, bindings) -> item, [ bindings ]
   in
-  let item, kinds = consume Type.kind Poly.kind_attr item in
-  let item, modes = consume Type.mode Poly.mode_attr item in
-  let item, modalities = consume Type.modality Poly.modality_attr item in
-  let item, allocs = consume Type.alloc Poly.alloc_attr item in
+  let item, kinds = consume Poly.kind_attr item in
+  let item, modes = consume Poly.mode_attr item in
+  let item, modalities = consume Poly.modality_attr item in
+  let item, allocs = consume Poly.alloc_attr item in
   let polys = kinds @ modes @ modalities @ allocs in
   let polys_res =
     polys
@@ -404,7 +406,7 @@ let consume_poly ctx item =
 let poly = { f = consume_poly }
 
 module Mono = struct
-  type t = Expression.Basic.packed list Type.Map.t
+  type t = Expression.Basic.packed Loc.t list Type.Map.t
 
   let contexts : _ Context.packed list =
     [ T Expression; T Module_expr; T Core_type; T Module_type ]
@@ -455,8 +457,7 @@ module Exclave_if = struct
       ~name
       ~contexts:[ T Expression ]
       ~pattern:
-        (Ast_pattern.single_expr_payload ((Ast_pattern_helpers.ident_expr type_).pat ())
-         |> Ast_pattern.map1' ~f:(fun loc mode -> mode, loc))
+        (Ast_pattern.single_expr_payload ((Ast_pattern_helpers.ident_expr type_).pat ()))
       ~k:Fn.id
   ;;
 
@@ -492,47 +493,6 @@ end
 
 let zero_alloc_if_local = consume_attr_if Zero_alloc_if.local_attr
 let zero_alloc_if_stack = consume_attr_if Zero_alloc_if.stack_attr
-
-module Conflate = struct
-  let attr contexts type_from type_to name =
-    declare
-      ~name:("conflate_" ^ name)
-      ~contexts
-      ~pattern:
-        (type_from
-         |> Ast_pattern_helpers.ident
-         |> Ast_pattern_helpers.one_or_many_as_list
-         |> Ast_pattern.single_expr_payload
-         |> Ast_pattern.map1 ~f:(fun idents ->
-           List.map idents ~f:(fun (ident : _ Identifier.t) ->
-             Conflation.P
-               { existing_identifier = ident
-               ; new_identifier = { ident = ident.ident; type_ = type_to }
-               })))
-      ~k:Fn.id
-  ;;
-
-  let mono_modes = attr Mono.contexts Type.mode Type.modality "mode_as_modality"
-  let mono_modalities = attr Mono.contexts Type.modality Type.mode "modality_as_mode"
-  let poly_modes = attr Poly.contexts Type.mode Type.modality "mode_as_modality"
-  let poly_modalities = attr Poly.contexts Type.modality Type.mode "modality_as_mode"
-end
-
-let make_conflate attrs =
-  let consume ctx item =
-    let item, conflations =
-      List.fold_left_map attrs ~init:item ~f:(fun item attr ->
-        match consume_attr attr ctx item with
-        | None -> item, []
-        | Some (item, conflations) -> item, conflations)
-    in
-    item, List.concat conflations
-  in
-  { f = consume }
-;;
-
-let conflate_mono = make_conflate [ Conflate.mono_modes; Conflate.mono_modalities ]
-let conflate_poly = make_conflate [ Conflate.poly_modes; Conflate.poly_modalities ]
 
 module Floating = struct
   module Context = struct
@@ -579,15 +539,14 @@ module Floating = struct
 
   let contexts : _ Context.packed list = [ T Structure_item; T Signature_item ]
 
-  let declare_poly ~name ~type_ ~pattern =
+  let declare_poly ~name ~pattern =
     List.map [ false; true ] ~f:(fun default ->
       let name = if default then name ^ ".default" else name in
-      declare ~name ~contexts ~pattern ~k:(fun bindings ->
-        { Poly.bindings = Poly (type_, bindings); default }))
+      declare ~name ~contexts ~pattern ~k:(fun bindings -> { Poly.bindings; default }))
   ;;
 
   let declare_basic type_ expr_pat ~name =
-    declare_poly ~name ~type_ ~pattern:(Attached_poly.basic_pattern type_ expr_pat)
+    declare_poly ~name ~pattern:(Attached_poly.basic_pattern type_ expr_pat)
   ;;
 
   let kind_poly = declare_basic Type.kind Ast_pattern_helpers.kind_expr ~name:"kind"
@@ -604,14 +563,7 @@ module Floating = struct
   ;;
 
   let alloc_poly =
-    declare_poly
-      ~name:"alloc"
-      ~type_:Type.alloc
-      ~pattern:
-        (Ast_pattern_helpers.binding_poly
-           ~pattern_pat:Ast_pattern_helpers.alloc_pattern
-           ~expression_pat:(Ast_pattern_helpers.ident_expr Type.(tuple2 alloc mode))
-           ~mangle:(fun (Tuple2 (alloc, _)) -> alloc))
+    declare_poly ~name:"alloc" ~pattern:(Attached_poly.alloc_binding_pattern ())
   ;;
 
   let convert_poly ctx ast =

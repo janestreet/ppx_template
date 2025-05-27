@@ -77,3 +77,86 @@ end
 val mangle__local : int = 1
 val no_mangle : int = 1
 |}]
+
+module M : sig
+  val%template id : ('a : k). 'a -> 'a [@@kind k = (value, float64)]
+end = struct
+  let%template[@kind k = (value, float64)] id x = x
+end
+
+[%%expect
+  {|
+module M :
+  sig val id : 'a -> 'a val id__float64 : ('a : float64). 'a -> 'a end
+|}]
+
+let () =
+  let (_ : string) = M.id "test" in
+  let (_ : float#) = (M.id [@kind float64]) #3. in
+  ()
+;;
+
+module M' : sig
+  val%template id : ('a : k). 'a -> 'a [@@kind k = (value_or_null, bits32)]
+end = struct
+  let%template[@kind k = (value_or_null, bits32)] id x = x
+end
+
+[%%expect
+  {|
+module M' :
+  sig val id : 'a -> 'a val id__bits32 : ('a : bits32). 'a -> 'a end
+|}]
+
+let () =
+  let (_ : int or_null) = M'.id Null in
+  let (_ : int32#) = (M'.id [@kind bits32]) #2l in
+  ()
+;;
+
+module Err : sig
+  val%template id : ('a : k). 'a -> 'a [@@kind k = (value, value_or_null)]
+end = struct
+  let%template[@kind k = (value, value_or_null)] id x = x
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Variable id is bound several times in this matching
+|}]
+
+module Workaround : sig
+  val%template id : ('a : k). 'a -> 'a [@@kind k = (value, value_or_null mod maybe_null)]
+end = struct
+  let%template[@kind k = (value, value_or_null mod maybe_null)] id x = x
+end
+
+[%%expect
+  {|
+module Workaround :
+  sig val id : 'a -> 'a val id__'value_or_null_mod_maybe_null' : 'a -> 'a end
+|}]
+
+module Weird : sig
+  val id : 'a -> 'a
+end = struct
+  let id x = x
+end
+
+let%template this_mangles_but_doesn't_type_check =
+  (Weird.id [@kind value_or_null]) Basement.Or_null_shim.Null
+;;
+
+[%%expect
+  {|
+module Weird : sig val id : 'a -> 'a end
+
+Line _, characters _-_:
+Error: This expression has type 'a or_null
+       but an expression was expected of type ('b : value)
+       The kind of 'a or_null is immediate_or_null with 'a
+         because it is the primitive immediate_or_null type or_null.
+       But the kind of 'a or_null must be a subkind of value
+         because of the definition of id at file "mangling.mlt", line 145, characters 2-19.
+|}]

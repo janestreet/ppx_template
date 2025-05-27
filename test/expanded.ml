@@ -349,7 +349,7 @@ end
   let x = {| [exclave_] is not inserted multiple times |}
 
   let%template id x = x [@exclave_if_local n] [@exclave_if_stack a]
-  [@@alloc a @ m = (heap, stack)] [@@mode n = (local, global)]
+  [@@alloc a @ m = (heap_global, stack_local)] [@@mode n = (local, global)]
   ;;]
 
 let x = {| [exclave_] is not inserted multiple times |}

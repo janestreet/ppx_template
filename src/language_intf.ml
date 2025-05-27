@@ -76,7 +76,11 @@ open! Import
     | expression<kind> ("&" expression<kind>)+
     | expression<kind> "mod" expression<mode>+
 
-    expression<alloc_at_mode> ::= identifier
+    expression<alloc> ::= identifier
+
+    expression<alloc_at_mode> ::=
+    | identifier
+    | identifier "@" identifier
     v} *)
 
 module Definitions = struct
@@ -122,7 +126,7 @@ module Definitions = struct
     type 'a t =
       | Identifier : 'a Identifier.t -> 'a t
       | Kind_product : Type.kind t list -> Type.kind t
-      | Kind_mod : Type.kind t * String.Set.t -> Type.kind t
+      | Kind_mod : Type.kind t * Type.modality t list -> Type.kind t
       | Tuple2 : 'a t * 'b t -> ('a * 'b) t
 
     type packed = P : 'a t -> packed [@@unboxed]
@@ -136,7 +140,7 @@ module Definitions = struct
     type 'a t =
       | Identifier : 'a Type.basic Identifier.t -> 'a Type.basic t
       | Kind_product : Type.kind t list -> Type.kind t
-      | Kind_mod : Type.kind t * String.Set.t -> Type.kind t
+      | Kind_mod : Type.kind t * Type.modality t list -> Type.kind t
       | Tuple2 : 'a t * 'b t -> ('a * 'b) t
 
     type packed = P : 'a t -> packed [@@unboxed]
@@ -167,7 +171,7 @@ module Definitions = struct
   module Binding = struct
     type ('a, 'mangle) t =
       { pattern : 'a Pattern.t
-      ; expressions : 'a Expression.t list
+      ; expressions : 'a Expression.t Loc.t list
       ; mangle : 'a Value.t -> 'mangle Value.t
       (** When an item [let lhs = rhs [@@attr pat = (expr1, expr2)]] is evaluated e.g. on
           [expr1], the expression gets evaluated to a [Value.t], which is then passed to
@@ -175,6 +179,8 @@ module Definitions = struct
           enable [[@@alloc (a @ m) = ...]] to mangle only based on [a]. *)
       }
       constraint 'mangle = _ Type.basic
+
+    type packed = P : _ t -> packed
   end
 
   module Node = struct
@@ -184,25 +190,6 @@ module Definitions = struct
       | Mode : mode loc -> Type.mode t
       | Modality : modality loc -> Type.modality t
       | Alloc : Type.alloc t
-  end
-
-  module Conflation = struct
-    (** A [('a, 'b) t] represents a type-cast from ['a] to ['b] of a particular
-        identifier. In the DSL of [ppx_template], it is analagous to
-        {[
-          let new_identifier : 'b = Obj.magic (existing_identifier : 'a)
-        ]}
-
-        We currently only allow conflation from [Type.mode] to [Type.modality] and vice
-        versa, which is okay because modes and modalities in OCaml have the same set of
-        valid identifiers. If a conflation is done incorrectly, at worst the user will get
-        a ppx or compiler error. *)
-    type ('a, 'b) t =
-      { existing_identifier : 'a Identifier.t
-      ; new_identifier : 'b Identifier.t
-      }
-
-    type packed = P : ('a, 'b) t -> packed [@@unboxed]
   end
 end
 
@@ -224,6 +211,7 @@ module type Language = sig
 
     module Map : Map.S with type key := packed
 
+    val sexp_of_t : _ t -> Sexp.t
     val kind : kind t
     val mode : mode t
     val modality : modality t
@@ -243,6 +231,7 @@ module type Language = sig
     end
 
     val compare : 'a t -> 'a t -> int
+    val sexp_of_t : _ t -> Sexp.t
     val type_ : 'a t -> 'a Type.t
 
     (** Convert a value in the template language to a concrete OCaml AST node. *)
@@ -273,15 +262,10 @@ module type Language = sig
       include Env
     end
 
-    val empty : t
-    val find : t -> 'a Identifier.t -> 'a Value.t option
+    (** An [Env.t] populated with initial bindings for [heap] and [stack] *)
+    val initial : t
 
-    (** [conflate env conflations] updates [env] with each
-        [Conflation.P { existing_identifier; new_identifier }] in [conflations], looking
-        up [existing_identifier] in [env] and binding the result to [new_identifier], even
-        though [x] has a different type in the template language. This is only used in a
-        restricted manner to enable conflating modes and modalities. *)
-    val conflate : t -> Conflation.packed list -> t
+    val find : t -> 'a Identifier.t -> 'a Value.t option
 
     (** Adds a new binding to the environment. *)
     val bind : t -> 'a Pattern.t -> 'a Value.t -> t
@@ -290,6 +274,6 @@ module type Language = sig
         are evaluated as an equivalent [Value.Identifier] under the assumption that the
         identifier will be interpreted by the OCaml compiler; if it is not, we let the
         compiler report the error to the user. *)
-    val eval : t -> 'a Expression.t -> 'a Value.t
+    val eval : t -> 'a Expression.t Loc.t -> 'a Value.t
   end
 end

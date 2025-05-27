@@ -1,5 +1,5 @@
 (library
  (name ppx_template_example)
- (libraries core float_u)
+ (libraries core unboxed.float_u)
  (preprocess
   (pps ppx_jane)))

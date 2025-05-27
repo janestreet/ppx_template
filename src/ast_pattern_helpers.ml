@@ -10,15 +10,28 @@ let map_pat { pat } ~f = { pat = (fun () -> map1 (pat ()) ~f) }
 let at_most_one_pattern p = p ^:: nil ||| map0 nil ~f:[]
 let at_most_one_eval p = pstr (at_most_one_pattern (pstr_eval p nil))
 
-let ident type_ =
+let ident' type_ =
   { pat =
       (fun () ->
-        pexp_ident (map1 (lident __) ~f:(fun ident -> { Identifier.type_; ident })))
+        pexp_ident
+          (map1' (lident __) ~f:(fun loc ident ->
+             match ident with
+             | "@" | "=" ->
+               (* This helps break parsing ambiguity between punning and alternate forms
+                  of alloc-poly (otherwise, [[@@alloc a = heap]] can be parsed as a punned
+                  binding with the identifiers [( = )], [a], and [heap]). *)
+               Ppxlib__.Ast_pattern0.fail loc ("Invalid ppx_template identifier: " ^ ident)
+             | _ -> { txt = { Identifier.type_; ident }; loc })))
   }
 ;;
 
+let ident type_ = map_pat (ident' type_) ~f:Loc.txt
 let ident_pattern type_ = map_pat (ident type_) ~f:(fun ident -> Pattern.Identifier ident)
-let ident_expr type_ = map_pat (ident type_) ~f:(fun ident -> Expression.Identifier ident)
+
+let ident_expr type_ =
+  map_pat (ident' type_) ~f:(Loc.map ~f:(fun ident -> Expression.Identifier ident))
+;;
+
 let one_or_many a b = map1 a ~f:(fun x -> [ x ]) ||| b
 let tuple_or_one p = one_or_many p (pexp_tuple (many p))
 
@@ -40,20 +53,22 @@ let binding pat expr mangle =
 let punned_binding expr mangle =
   map_pat expr ~f:(fun expr : _ Binding.t ->
     let ident = Ppxlib.gen_symbol ~prefix:"binding" () in
-    let type_ = Expression.type_ expr in
+    let type_ = Expression.type_ expr.txt in
     let pattern = Pattern.Identifier { ident; type_ } in
     { pattern; expressions = [ expr ]; mangle })
 ;;
 
-let binding_poly ~pattern_pat ~expression_pat ~mangle =
+let binding_poly ~pattern_pat ~expression_pat ~mangle ~mangle_type =
   tuple_or_one (binding pattern_pat expression_pat mangle)
   ||| one_or_many_as_list (punned_binding expression_pat mangle)
   |> at_most_one_eval
+  |> map1 ~f:(fun bindings ->
+    Attributes_intf.Definitions.Poly.Poly (mangle_type, bindings))
 ;;
 
 let binding_mono binding =
   binding
-  |> map_pat ~f:(fun expr -> Expression.Basic.P expr)
+  |> map_pat ~f:(Loc.map ~f:(fun expr -> Expression.Basic.P expr))
   |> one_or_many_as_list
   |> at_most_one_eval
 ;;
@@ -67,6 +82,20 @@ let alloc_pattern =
            ^:: no_label ((ident_pattern Type.mode).pat ())
            ^:: nil)
         |> map2 ~f:(fun alloc mode -> Pattern.Tuple2 (alloc, mode)))
+  }
+;;
+
+let alloc_expr =
+  { pat =
+      (fun () ->
+        pexp_apply
+          (pexp_ident (lident (string "@")))
+          (no_label ((ident_expr Type.alloc).pat ())
+           ^:: no_label ((ident_expr Type.mode).pat ())
+           ^:: nil)
+        |> map2' ~f:(fun loc alloc mode ->
+          { txt = Expression.Tuple2 (alloc.txt, mode.txt); loc })
+        ||| (ident_expr Type.(tuple2 alloc mode)).pat ())
   }
 ;;
 
@@ -103,15 +132,16 @@ let kind_expr =
       in
       let modifiers =
         List.map modifier_exps ~f:(function
-          | { pexp_desc = Pexp_ident { txt = Lident modifier; _ }; _ } -> modifier
+          | { pexp_desc = Pexp_ident { txt = Lident modifier; _ }; _ } ->
+            Expression.Identifier { ident = modifier; type_ = Basic Modality }
           | { pexp_loc = loc; _ } -> report_syntax_error ~loc)
       in
-      Kind_mod (base, String.Set.of_list modifiers)
+      Kind_mod (base, modifiers)
     | { pexp_loc = loc; _ } -> report_syntax_error ~loc
   in
   { pat =
       (fun () ->
-        Ast_pattern.of_func (fun (_ : Ast_pattern.context) (_ : location) expr k ->
-          k (of_expr expr)))
+        Ast_pattern.of_func (fun (_ : Ast_pattern.context) loc expr k ->
+          k { txt = of_expr expr; loc }))
   }
 ;;

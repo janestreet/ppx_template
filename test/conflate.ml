@@ -2,69 +2,70 @@ open! Core
 
 [@@@disable_unused_warnings]
 
-[@@@expand_inline
-  [%%template
-  [@@@mode m = (local, global)]
-
-  module T : sig
-    type t = { x : string -> string } [@@conflate_mode_as_modality m]
-  end = struct
-    type t = { x : string -> string } [@@conflate_mode_as_modality m]
-  end]]
-
-include struct
-  module T : sig
-    type t = { x : string -> string }
-  end = struct
-    type t = { x : string -> string }
-  end
-end
-
-include struct
-  module T : sig
-    type t = { x : string -> string [@globalized] }
-  end = struct
-    type t = { x : string -> string [@globalized] }
-  end
-end
-
-[@@@end]
+(* We always conflate modes/modalities for portability and contention axes *)
 
 [@@@expand_inline
-  [%%template
-    let f x = x [@@modality m = (local, global)] [@@conflate_modality_as_mode m]]]
-
-let f x = x
-and f__global x = x
-
-[@@@end]
-
-[@@@expand_inline
-  module type X = sig
+  module type Y = sig
     val f : unit -> unit
   end
 
-  module%template.portable [@modality p] [@conflate_modality_as_mode p] M (X : X) = struct
-    let g = X.f
+  module%template.portable [@modality p] M (Y : Y) = struct
+    let g = Y.f
   end]
 
-module type X = sig
+module type Y = sig
   val f : unit -> unit
 end
 
 include struct
-  module M__portable (X : sig
-      include X
+  module M__portable (Y : sig
+      include Y
     end) =
   struct
-    let g = X.f
+    let g = Y.f
   end
 
-  module M (X : sig
-      include X
+  module M (Y : sig
+      include Y
     end) =
   struct
-    let g = X.f
+    let g = Y.f
+  end
+end
+
+[@@@end]
+
+[@@@expand_inline
+  [%%template
+  [@@@mode p = (nonportable, portable)]
+
+  type u = { field : unit -> unit } [@@mode p]
+
+  [@@@kind.default k = (value mod p, bits64 mod p)]
+
+  type t]]
+
+include struct
+  type u = { field : unit -> unit }
+
+  include struct
+    type t__'value_mod_nonportable'
+  end
+
+  include struct
+    type t__'bits64_mod_nonportable'
+  end
+end
+
+include struct
+  type u__portable = { field : unit -> unit }
+
+  include struct
+    type t__'value_mod_portable'
+  end
+
+  include struct
+    type t__'bits64_mod_portable'
   end
 end
 
