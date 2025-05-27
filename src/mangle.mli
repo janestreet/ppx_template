@@ -29,6 +29,6 @@ val t : Suffix.t Ast_traverse.map_with_context
 val mangle
   :  'a Attributes.Context.mono
   -> 'a
-  -> Expression.Basic.packed list Type.Map.t
+  -> Expression.Basic.packed Loc.t list Type.Map.t
   -> env:Env.t
   -> 'a

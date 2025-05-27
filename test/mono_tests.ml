@@ -7,7 +7,7 @@
 [@@@mode.default m = (global, local)]
 [@@@modality.default n = (nonportable, portable)]
 
-let func x = x [@@alloc a @ m = (heap, stack)]
+let func x = x [@@alloc a @ m = (heap_global, stack_local)]
 
 module Module = struct end
 

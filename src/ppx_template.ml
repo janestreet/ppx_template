@@ -61,6 +61,26 @@ let core_type =
       Monomorphize.t#core_type Monomorphize.Context.top typ)
 ;;
 
+let require_template_extension = ref false
+let require_template_extension_flag = "-require-template-extension"
+
+let () =
+  Driver.add_arg
+    require_template_extension_flag
+    (Set require_template_extension)
+    ~doc:"disallow bare ppx_template attributes"
+;;
+
+let check_if_bare_attributes_allowed ~loc =
+  if !require_template_extension
+  then
+    Location.raise_errorf
+      ~loc
+      "ppx_template: [%%template] extension is required to interpret attribute due to %s \
+       flag"
+      require_template_extension_flag
+;;
+
 let mono_attrs = []
 
 let () =

@@ -119,3 +119,73 @@ end
 module%template [@modality m = (portable, nonportable)] _ : Monad [@modality m] =
   Option
   [@modality m]
+
+(* Kind modifiers are modalities *)
+
+module%template Maybe_portable_box : sig @@ portable
+  [@@@modality.default p = (portable, nonportable)]
+
+  type 'a t : value mod p
+
+  val wrap : 'a @ p -> ('a t[@modality p])
+  val unwrap : ('a t[@modality p]) -> 'a @ p
+end = struct
+  [@@@modality.default p = (portable, nonportable)]
+
+  type 'a t = { contents : 'a @@ p } [@@unboxed]
+
+  let wrap contents = { contents }
+  let unwrap { contents } = contents
+end
+
+let%template _portable =
+  let box @ nonportable = (Maybe_portable_box.wrap [@modality portable]) (fun x -> x) in
+  let _portable_box @ portable = box in
+  let _portable_contents @ portable =
+    (Maybe_portable_box.unwrap [@modality portable]) box
+  in
+  ()
+;;
+
+let%template _nonportable =
+  let r = ref 0 in
+  let box @ nonportable =
+    (Maybe_portable_box.wrap [@modality nonportable]) (fun x -> r := x)
+  in
+  let _nonportable_contents @ nonportable =
+    (Maybe_portable_box.unwrap [@modality nonportable]) box
+  in
+  ()
+;;
+
+[@@@expand_inline
+  module%template _ = struct
+    [@@@modality.default p = (nonportable, portable)]
+    [@@@kind.default k = (value mod p, bits64 mod p)]
+
+    type _t : k
+  end]
+
+module _ = struct
+  include struct
+    include struct
+      type _t__'value_mod_nonportable' : value mod nonportable
+    end
+
+    include struct
+      type _t__'bits64_mod_nonportable' : bits64 mod nonportable
+    end
+  end
+
+  include struct
+    include struct
+      type _t__'value_mod_portable'__portable : value mod portable
+    end
+
+    include struct
+      type _t__'bits64_mod_portable'__portable : bits64 mod portable
+    end
+  end
+end
+
+[@@@end]

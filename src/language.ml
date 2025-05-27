@@ -41,7 +41,7 @@ module Type = struct
 
   let rec sexp_of_t : type a. a t -> Sexp.t = function
     | Basic basic -> sexp_of_basic basic
-    | Tuple2 (t1, t2) -> List [ Atom "Tuple"; sexp_of_t t1; sexp_of_t t2 ]
+    | Tuple2 (t1, t2) -> List [ sexp_of_t t1; Atom "@"; sexp_of_t t2 ]
   ;;
 
   module Map = Map.Make (struct
@@ -81,7 +81,10 @@ module Value = struct
     | Kind_product kinds1, Kind_product kinds2 -> List.compare kinds1 kinds2 ~cmp:compare
     | Kind_mod (kind1, mods1), Kind_mod (kind2, mods2) ->
       (match compare kind1 kind2 with
-       | 0 -> String.Set.compare mods1 mods2
+       | 0 ->
+         let mods1 = List.sort_uniq ~cmp:compare mods1 in
+         let mods2 = List.sort_uniq ~cmp:compare mods2 in
+         List.compare ~cmp:compare mods1 mods2
        | n -> n)
     | Tuple2 (t1a, t1b), Tuple2 (t2a, t2b) ->
       (match compare t1a t2a with
@@ -104,7 +107,7 @@ module Value = struct
       List
         [ Atom "Mod"
         ; sexp_of_t kind
-        ; String.Set.to_list mods |> sexp_of_list sexp_of_string
+        ; List.sort_uniq mods ~cmp:compare |> sexp_of_list sexp_of_t
         ]
     | Tuple2 (t1, t2) -> List [ Atom "Tuple"; sexp_of_t t1; sexp_of_t t2 ]
   ;;
@@ -136,7 +139,9 @@ module Value = struct
     | Kind_mod (kind, mods) ->
       let (Jkind_annotation kind) = to_node ~loc kind in
       let mods =
-        String.Set.to_list mods |> List.map ~f:(fun mode -> { txt = Mode mode; loc })
+        List.sort_uniq mods ~cmp:compare
+        |> List.map ~f:(fun (Identifier { ident; type_ = Basic Modality }) ->
+          { txt = Mode ident; loc })
       in
       Jkind_annotation { pjkind_desc = Mod (kind, mods); pjkind_loc = loc }
   ;;
@@ -175,7 +180,10 @@ module Expression = struct
     | Kind_product kinds1, Kind_product kinds2 -> List.compare kinds1 kinds2 ~cmp:compare
     | Kind_mod (kind1, mods1), Kind_mod (kind2, mods2) ->
       (match compare kind1 kind2 with
-       | 0 -> String.Set.compare mods1 mods2
+       | 0 ->
+         let mods1 = List.sort_uniq ~cmp:compare mods1 in
+         let mods2 = List.sort_uniq ~cmp:compare mods2 in
+         List.compare ~cmp:compare mods1 mods2
        | n -> n)
     | Tuple2 (t1a, t1b), Tuple2 (t2a, t2b) ->
       (match compare t1a t2a with
@@ -198,7 +206,7 @@ module Expression = struct
       List
         [ Atom "Mod"
         ; sexp_of_t kind
-        ; String.Set.to_list mods |> sexp_of_list sexp_of_string
+        ; List.sort_uniq mods ~cmp:compare |> sexp_of_list sexp_of_t
         ]
     | Tuple2 (t1, t2) -> List [ Atom "Tuple"; sexp_of_t t1; sexp_of_t t2 ]
   ;;
@@ -213,26 +221,23 @@ module Expression = struct
   ;;
 end
 
-let cast : type a b. a Value.t -> b Type.t -> b Value.t =
-  fun value as_ ->
-  match value, as_ with
-  | Identifier { ident; type_ = _ }, Basic _ -> Identifier { ident; type_ = as_ }
-  | value, as_ ->
-    failwith
-      (List
-         [ Atom
-             "Internal [ppx_template] error: do not know how to cast non-identifier \
-              values to other types."
-         ; List [ Atom "value"; Value.sexp_of_t value ]
-         ; List [ Atom "type"; Type.sexp_of_t as_ ]
-         ]
-       |> Sexp.to_string_hum)
-;;
-
 module Env = struct
   include Env
 
-  let empty = []
+  let initial : t =
+    let open Identifier in
+    let heap_alloc = { ident = "heap"; type_ = Type.alloc } in
+    let stack_alloc = { ident = "stack"; type_ = Type.alloc } in
+    let global_mode = { ident = "global"; type_ = Type.mode } in
+    let local_mode = { ident = "local"; type_ = Type.mode } in
+    let heap_alloc_mode = { ident = "heap_global"; type_ = Type.(tuple2 alloc mode) } in
+    let stack_alloc_mode = { ident = "stack_local"; type_ = Type.(tuple2 alloc mode) } in
+    [ Entry (heap_alloc, Identifier heap_alloc)
+    ; Entry (stack_alloc, Identifier stack_alloc)
+    ; Entry (heap_alloc_mode, Tuple2 (Identifier heap_alloc, Identifier global_mode))
+    ; Entry (stack_alloc_mode, Tuple2 (Identifier stack_alloc, Identifier local_mode))
+    ]
+  ;;
 
   let find (type a) (t : t) (ident : a Identifier.t) =
     List.find_map t ~f:(fun (Entry (ident', value)) ->
@@ -240,37 +245,129 @@ module Env = struct
         value))
   ;;
 
-  let conflate_one t (P { new_identifier; existing_identifier } : Conflation.packed) =
-    match find t existing_identifier with
-    | None -> t
-    | Some value ->
-      let value' = cast value new_identifier.type_ in
-      Entry (new_identifier, value') :: t
-  ;;
-
-  let conflate t conflations = List.fold_left conflations ~init:t ~f:conflate_one
-
   let rec bind : type a. t -> a Pattern.t -> a Value.t -> t =
     fun env pat value ->
     match pat, value with
-    | Identifier pat, value -> Entry (pat, value) :: env
+    | Identifier pat, value ->
+      (* We always conflate modes and modalities for the portability and contention axes.
+         These axes have the property that the legacy mode coincides with the top mode
+         for comonadic axes and bottom mode for monadic axes[^0]. When this holds,
+         ['a @ m -> 'b @ n] is equivalent to ['a @@ m -> 'b @@ n].
+
+         More thoroughly: let [t @@ m] be a type whenever [t] is a type and [m] is a
+         modality, such that [t @@ m] behaves like
+         {[
+           type t_atat_m = { inner : t @@ m } [@@unboxed]
+         ]}
+         i.e. is a zero-cost modality box around the type. Note that we define [t @@ m]
+         even when [m] is a modality that does nothing; for example, [t @@ local] behaves
+         just as [t] (since the [local] modality does nothing[^1]).
+
+         Then, for all modes/modalities [m] and [n] on comonadic (resp. monadic) axes, if
+         we let [ext_m] and [ext_n] be the top (resp. bottom) mode of the corresponding
+         axes ([ext] as in "extremum"), then ['a @ m -> 'b @ n] is equivalent to
+         ['a @@ m @ ext_m -> 'b @@ n @ ext_n]. For example, ['a @ local -> 'b @ global]
+         is equivalent to ['a @@ local @ local -> 'b @@ global @ local], and (since
+         ['a @@ local] is just ['a]) also ['a @ local -> 'b @@ global @ local].
+
+         To make conflating a mode with its corresponding modality act in unsurprising
+         ways, we want ['a @ m -> 'b @ n] to be equivalent to ['a @@ m -> 'b @@ n], which
+         is implicitly ['a @@ m @ legacy_m -> 'b @@ n @ legacy_n]. This holds exactly
+         when [ext_m = legacy_m] and [ext_n = legacy_n].
+
+         Going through all of the currently supported axes:
+         {v
+            +-------------+-------------+-------------+-------------+
+            |    axis     |  direction  |   [ext_m]   |   legacy    |
+            +-------------+-------------+-------------+-------------+
+            | locality    | comonadic   | local       | global      |
+            +-------------+-------------+-------------+-------------+
+            | portability | comonadic   | nonportable | nonportable |
+            +-------------+-------------+-------------+-------------+
+            | contention  |   monadic   | uncontended | uncontended |
+            +-------------+-------------+-------------+-------------+
+            | affinity    | comonadic   | once        | many        |
+            +-------------+-------------+-------------+-------------+
+            | uniqueness  |   monadic   | unique      | aliased     |
+            +-------------+-------------+-------------+-------------+
+            | yielding    | comonadic   | yielding    | unyielding  |
+            +-------------+-------------+-------------+-------------+
+         v}
+
+         The only axes for which the right two columns align are portability and
+         contention. For this reason, we always conflate modes and modalities on these two
+         axes, and never on the other axes.
+
+         [^0] The "top" (resp. "bottom") mode of an axis is the mode which is a super-mode
+         (resp. sub-mode) of all other modes on the axis.
+
+         [^1] Each modality acts as meet (min) for comonadic axes and join (max) for
+         monadic axes; e.g. the [global] modality acts as [fun m -> meet global m].
+         This means the [local] modality acts as [fun m -> meet local m], but since
+         [local] is top for the locality axis, [meet local m = m], so [local] just
+         acts as [fun m -> m], i.e. does nothing.
+      *)
+      let entries : Entry.t list =
+        match pat, value with
+        | ( { type_ = Basic (Mode | Modality); ident = pat_ident }
+          , Identifier
+              { ident =
+                  ("portable" | "nonportable" | "contended" | "shared" | "uncontended") as
+                  expr_ident
+              ; type_ = _
+              } ) ->
+          [ Entry
+              ( { ident = pat_ident; type_ = Basic Mode }
+              , Identifier { ident = expr_ident; type_ = Basic Mode } )
+          ; Entry
+              ( { ident = pat_ident; type_ = Basic Modality }
+              , Identifier { ident = expr_ident; type_ = Basic Modality } )
+          ]
+        | _ -> [ Entry (pat, value) ]
+      in
+      entries @ env
     | Tuple2 (pat1, pat2), Tuple2 (value1, value2) ->
       bind (bind env pat1 value1) pat2 value2
   ;;
 
-  let rec eval : type a. t -> a Expression.t -> a Value.t =
-    fun env expr ->
-    match expr with
-    | Identifier ident ->
-      (match find env ident with
-       | Some value -> value
-       | None ->
-         (match Expression.type_ expr with
-          | Basic _ -> Identifier ident
-          | Tuple2 _ ->
-            Location.raise_errorf "Unbound template identifier %s." ident.ident))
-    | Tuple2 (expr1, expr2) -> Tuple2 (eval env expr1, eval env expr2)
-    | Kind_product kinds -> Kind_product (List.map kinds ~f:(eval env))
-    | Kind_mod (kind, mods) -> Kind_mod (eval env kind, mods)
+  let eval env { txt = expr; loc } =
+    let rec loop : type a. a Expression.t -> a Value.t =
+      fun expr ->
+      match expr with
+      | Identifier ident ->
+        (match find env ident with
+         | Some value -> value
+         | None ->
+           let typ = Expression.type_ expr in
+           (match typ with
+            | Basic (Mode | Modality | Kind) -> Identifier ident
+            | Tuple2 _ | Basic Alloc ->
+              let hint =
+                match typ, ident.ident with
+                | Basic Alloc, "heap_global" -> Some "Did you mean [heap]?"
+                | Basic Alloc, "stack_local" -> Some "Did you mean [stack]?"
+                | Tuple2 (Basic Alloc, Basic Mode), "heap" ->
+                  Some "Did you mean [heap_global]?"
+                | Tuple2 (Basic Alloc, Basic Mode), "stack" ->
+                  Some "Did you mean [stack_local]?"
+                | _ -> None
+              in
+              let hint_string =
+                match hint with
+                | None -> ""
+                | Some hint -> "\nHint: " ^ hint
+              in
+              Location.raise_errorf
+                ~loc
+                "Unbound template identifier [%s] of type [%s].%s"
+                ident.ident
+                (Type.sexp_of_t typ |> Sexp.to_string_hum)
+                hint_string))
+      | Tuple2 (expr1, expr2) -> Tuple2 (loop expr1, loop expr2)
+      | Kind_product kinds -> Kind_product (List.map kinds ~f:loop)
+      | Kind_mod (kind, mods) ->
+        Kind_mod (loop kind, List.map mods ~f:loop |> List.sort_uniq ~cmp:Value.compare)
+    in
+    loop expr
   ;;
 end

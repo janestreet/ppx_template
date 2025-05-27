@@ -7,7 +7,7 @@ open! Core
     type 'a t = 'a list
 
     [%%template:
-    [@@@alloc.default __ @ m_out = (heap, stack)]
+    [@@@alloc.default __ @ m_out = (heap_global, stack_local)]
 
     (* [cons] can't implement [local -> heap] *)
     [@@@mode.default m_in = (global, m_out)]
@@ -15,7 +15,7 @@ open! Core
     val cons : 'a @ m_in -> 'a t @ m_in -> 'a t @ m_out [@@zero_alloc_if_local m_out]]
 
     [%%template:
-    [@@@alloc.default a @ m_out = (heap, stack)]
+    [@@@alloc.default a @ m_out = (heap_global, stack_local)]
     [@@@mode.default m_in = (local, global)]
 
     val map : 'a t @ m_in -> f:('a @ m_in -> 'a @ m_out) -> 'a t @ m_out
@@ -31,13 +31,13 @@ open! Core
     type 'a t = 'a list
 
     [%%template
-    [@@@alloc.default a @ m_out = (heap, stack)]
+    [@@@alloc.default a @ m_out = (heap_global, stack_local)]
     [@@@mode.default m_in = (global, m_out)]
 
     let cons (hd @ m_in) (tl @ m_in) = hd :: tl [@exclave_if_stack a]]
 
     [%%template
-    [@@@alloc.default a @ m_out = (heap, stack)]
+    [@@@alloc.default a @ m_out = (heap_global, stack_local)]
     [@@@mode.default m_in = (local, global)]
 
     let rec map (t @ m_in) ~f =
@@ -210,7 +210,7 @@ end
 
 [@@@expand_inline
   [%%template
-  [@@@alloc.default a @ m = (heap, stack)]
+  [@@@alloc.default a @ m = (heap_global, stack_local)]
 
   let[@alloc] f x = x]]
 
@@ -220,6 +220,102 @@ end
 
 include struct
   let f x = x
+end
+
+[@@@end]
+
+(* Further examples of using the alloc-poly syntax. *)
+
+[@@@expand_inline
+  [%%template
+  (* Normal *)
+  [@@@alloc.default a @ m = (heap_global, stack_local)]
+
+  module Outer1 = struct
+    (* Left-hand-side can be short-form [alloc] if the mode isn't needed *)
+    let f x = x [@exclave_if_stack a'] [@@alloc a' = (heap, stack)]
+
+    (* Right-hand-side can be in long-form [alloc @ mode] *)
+    [@@@alloc a' @ m' = (heap_global, a @ m)]
+
+    (* You can pun on an [alloc] *)
+    module [@alloc a'] Inner1 = struct
+      let f (x @ m') = x [@exclave_if_stack a']
+    end
+
+    (* You can pun on an [alloc @ mode] *)
+    module [@alloc a' @ m'] Inner2 = struct
+      let f (x @ m') = x [@exclave_if_stack a']
+    end
+  end
+
+  (* You can pun on [heap] and [stack] directly. *)
+  module [@alloc heap] Outer2 = struct
+    let f x = x
+  end
+
+  module [@alloc stack] Outer3 = struct
+    let f x = exclave_ x
+  end]]
+
+include struct
+  module Outer1 = struct
+    let f x = x
+    and f__stack x = exclave_ x
+
+    include struct
+      module Inner1 = struct
+        let f (x @ global) = x
+      end
+
+      module Inner2 = struct
+        let f (x @ global) = x
+      end
+    end
+  end
+
+  module Outer2 = struct
+    let f x = x
+  end
+
+  module Outer3__stack = struct
+    let f x = exclave_ x
+  end
+end
+
+include struct
+  module Outer1__stack = struct
+    let f x = x
+    and f__stack x = exclave_ x
+
+    include struct
+      module Inner1 = struct
+        let f (x @ global) = x
+      end
+
+      module Inner2 = struct
+        let f (x @ global) = x
+      end
+    end
+
+    include struct
+      module Inner1__stack = struct
+        let f (local_ x) = exclave_ x
+      end
+
+      module Inner2__stack = struct
+        let f (local_ x) = exclave_ x
+      end
+    end
+  end
+
+  module Outer2 = struct
+    let f x = x
+  end
+
+  module Outer3__stack = struct
+    let f x = exclave_ x
+  end
 end
 
 [@@@end]

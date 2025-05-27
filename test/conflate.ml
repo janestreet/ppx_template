@@ -2,71 +2,72 @@ open! Core
 
 [@@@disable_unused_warnings]
 
-[@@@expand_inline
-  [%%template
-  [@@@mode m = (local, global)]
-
-  module T : sig
-    type t = { x : string @ m -> string @ m @@ m } [@@conflate_mode_as_modality m]
-  end = struct
-    type t = { x : string @ m -> string @ m @@ m } [@@conflate_mode_as_modality m]
-  end]]
-
-include struct
-  module T : sig
-    type t = { x : local_ string -> local_ string @@ local }
-  end = struct
-    type t = { x : local_ string -> local_ string @@ local }
-  end
-end
-
-include struct
-  module T : sig
-    type t = { global_ x : string @ global -> string @ global }
-  end = struct
-    type t = { global_ x : string @ global -> string @ global }
-  end
-end
-
-[@@@end]
+(* We always conflate modes/modalities for portability and contention axes *)
 
 [@@@expand_inline
-  [%%template
-    let f (x @ m) = x [@@modality m = (local, global)] [@@conflate_modality_as_mode m]]]
-
-let f (local_ x) = x
-and f__global (x @ global) = x
-
-[@@@end]
-
-[@@@expand_inline
-  module type X = sig
+  module type Y = sig
     val f : unit -> unit
   end
 
-  module%template.portable [@modality p] [@conflate_modality_as_mode p] M (X : X) = struct
-    let g @ p = X.f
+  module%template.portable [@modality p] M (Y : Y) = struct
+    let g @ p = Y.f
   end]
 
-module type X = sig
+module type Y = sig
   val f : unit -> unit
 end
 
 include struct
-  module M__portable (X : sig
+  module M__portable (Y : sig
     @@ portable
-      include X
+      include Y
     end) =
   struct
-    let g @ portable = X.f
+    let g @ portable = Y.f
   end
 
-  module M (X : sig
+  module M (Y : sig
     @@ nonportable
-      include X
+      include Y
     end) =
   struct
-    let g @ nonportable = X.f
+    let g @ nonportable = Y.f
+  end
+end
+
+[@@@end]
+
+[@@@expand_inline
+  [%%template
+  [@@@mode p = (nonportable, portable)]
+
+  type u = { field : unit -> unit @@ p } [@@mode p]
+
+  [@@@kind.default k = (value mod p, bits64 mod p)]
+
+  type t : k]]
+
+include struct
+  type u = { field : unit -> unit @@ nonportable }
+
+  include struct
+    type t__'value_mod_nonportable' : value mod nonportable
+  end
+
+  include struct
+    type t__'bits64_mod_nonportable' : bits64 mod nonportable
+  end
+end
+
+include struct
+  type u__portable = { field : unit -> unit @@ portable }
+
+  include struct
+    type t__'value_mod_portable' : value mod portable
+  end
+
+  include struct
+    type t__'bits64_mod_portable' : bits64 mod portable
   end
 end
 
