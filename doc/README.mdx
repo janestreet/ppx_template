@@ -231,7 +231,7 @@ avoiding dependence on the particular mangling mechanism `ppx_template` uses as 
 in the future.
 
 ```ocaml
-let%template flip (type (a : k) (b : k) (c : k)) (f : (a -> b -> c) @@ p) = fun x y -> f y x
+let%template flip (type (a : k) (b : k) (c : k)) (f : (a -> b -> c) @ p) = fun x y -> f y x
 [@@mode p = (nonportable, portable)]
 [@@kind k = (bits32, bits64)]
 

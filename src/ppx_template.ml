@@ -82,40 +82,39 @@ let check_if_bare_attributes_allowed ~loc =
 ;;
 
 let mono_attrs =
-  let map_context : type a. a Attributes.Context.mono -> a Extension.Context.t
-        = function
-        | Core_type -> Core_type
-        | Expression -> Expression
-        | Module_type -> Module_type
-        | Module_expr -> Module_expr
-      in
-      let location_of : type a. a Attributes.Context.mono -> a -> Location.t = function
-        | Core_type -> fun x -> x.ptyp_loc
-        | Expression -> fun x -> x.pexp_loc
-        | Module_expr -> fun x -> x.pmod_loc
-        | Module_type -> fun x -> x.pmty_loc
-      in
-      List.map Attributes.Mono.contexts ~f:(fun (T ctxt) ->
-        let extension_context = map_context ctxt in
-        Context_free.Rule.attr_multiple_replace
-          "template"
-          extension_context
-          [ Attributes.Attribute_map.find_exn Attributes.Mono.kind_attr ctxt
-          ; Attributes.Attribute_map.find_exn Attributes.Mono.mode_attr ctxt
-          ; Attributes.Attribute_map.find_exn Attributes.Mono.modality_attr ctxt
-          ; Attributes.Attribute_map.find_exn Attributes.Mono.alloc_attr ctxt
-          ]
-          (fun ~ctxt:_ item [ kind; mode; modality; alloc ] ->
-            check_if_bare_attributes_allowed ~loc:(location_of ctxt item);
-            [ Language.Type.P Language.Type.kind, kind
-            ; Language.Type.P Language.Type.mode, mode
-            ; Language.Type.P Language.Type.modality, modality
-            ; Language.Type.P Language.Type.alloc, alloc
-            ]
-            |> List.filter_map ~f:(fun (type_, exprs) ->
-              Option.map exprs ~f:(fun exprs -> type_, exprs))
-            |> Language.Type.Map.of_list
-            |> Mangle.mangle ctxt item ~env:Language.Env.initial))
+  let map_context : type a. a Attributes.Context.mono -> a Extension.Context.t = function
+    | Core_type -> Core_type
+    | Expression -> Expression
+    | Module_type -> Module_type
+    | Module_expr -> Module_expr
+  in
+  let location_of : type a. a Attributes.Context.mono -> a -> Location.t = function
+    | Core_type -> fun x -> x.ptyp_loc
+    | Expression -> fun x -> x.pexp_loc
+    | Module_expr -> fun x -> x.pmod_loc
+    | Module_type -> fun x -> x.pmty_loc
+  in
+  List.map Attributes.Mono.contexts ~f:(fun (T ctxt) ->
+    let extension_context = map_context ctxt in
+    Context_free.Rule.attr_multiple_replace
+      "template"
+      extension_context
+      [ Attributes.Attribute_map.find_exn Attributes.Mono.kind_attr ctxt
+      ; Attributes.Attribute_map.find_exn Attributes.Mono.mode_attr ctxt
+      ; Attributes.Attribute_map.find_exn Attributes.Mono.modality_attr ctxt
+      ; Attributes.Attribute_map.find_exn Attributes.Mono.alloc_attr ctxt
+      ]
+      (fun ~ctxt:_ item [ kind; mode; modality; alloc ] ->
+        check_if_bare_attributes_allowed ~loc:(location_of ctxt item);
+        [ Language.Type.P Language.Type.kind, kind
+        ; Language.Type.P Language.Type.mode, mode
+        ; Language.Type.P Language.Type.modality, modality
+        ; Language.Type.P Language.Type.alloc, alloc
+        ]
+        |> List.filter_map ~f:(fun (type_, exprs) ->
+          Option.map exprs ~f:(fun exprs -> type_, exprs))
+        |> Language.Type.Map.of_list
+        |> Mangle.mangle ctxt item ~env:Language.Env.initial))
 ;;
 
 let () =

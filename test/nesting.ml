@@ -18,8 +18,8 @@ module _ : sig
     val y : unit
 
     include sig
-      module M__m1a__portable : () -> sig @@ portable end
-      module M__m1a : () -> sig @@ nonportable end
+      module M__m1a__portable : functor () -> sig @@ portable end
+      module M__m1a : functor () -> sig @@ nonportable end
     end
   end
 
@@ -28,8 +28,8 @@ module _ : sig
     val y : unit
 
     include sig
-      module M__m1b__portable : () -> sig @@ portable end
-      module M__m1b : () -> sig @@ nonportable end
+      module M__m1b__portable : functor () -> sig @@ portable end
+      module M__m1b : functor () -> sig @@ nonportable end
     end
   end
 

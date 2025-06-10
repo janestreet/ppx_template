@@ -22,15 +22,15 @@ val id__uncontended__global__portable : 'a @ portable -> 'a @ portable =
   <fun>
 val id__uncontended__local__nonportable : local_ 'a -> local_ 'a = <fun>
 val id__uncontended__local__portable :
-  local_ 'a @ portable -> local_ 'a @ portable = <fun>
+  'a @ local portable -> 'a @ local portable = <fun>
 val id__contended__global__nonportable : 'a @ contended -> 'a @ contended =
   <fun>
 val id__contended__global__portable :
   'a @ portable contended -> 'a @ portable contended = <fun>
 val id__contended__local__nonportable :
-  local_ 'a @ contended -> local_ 'a @ contended = <fun>
+  'a @ local contended -> 'a @ local contended = <fun>
 val id__contended__local__portable :
-  local_ 'a @ portable contended -> local_ 'a @ portable contended = <fun>
+  'a @ local portable contended -> 'a @ local portable contended = <fun>
 |}]
 
 (* Demonstrate the behavior of name mangling, in particular with respect
@@ -51,14 +51,14 @@ end
 module M__uncontended__global__nonportable :
   sig type 'a t = { global_ x : 'a; } end
 module M__uncontended__global__portable :
-  sig type 'a t = { global_ x : 'a @@ portable; } end
+  sig type 'a t = { x : 'a @@ global portable; } end
 module M : sig type 'a t = { x : 'a; } end
 module M__uncontended__local__portable :
   sig type 'a t = { x : 'a @@ portable; } end
 module M__contended__global__nonportable :
-  sig type 'a t = { global_ x : 'a @@ contended; } end
+  sig type 'a t = { x : 'a @@ global contended; } end
 module M__contended__global__portable :
-  sig type 'a t = { global_ x : 'a @@ portable contended; } end
+  sig type 'a t = { x : 'a @@ global portable contended; } end
 module M__contended__local__nonportable :
   sig type 'a t = { x : 'a @@ contended; } end
 module M__contended__local__portable :
