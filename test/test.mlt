@@ -1,4 +1,4 @@
-open! Core
+open! Ppx_template_test_common
 
 (* Normal compiler error for unknown layout. *)
 let%template id (type a : x) (x : a) : a = x
@@ -360,7 +360,7 @@ let%template[@kind foo = Bar] _ : _ = ()
 [%%expect
   {|
 Line _, characters _-_:
-Error: expected a kind abbreviation, product of kinds, or kind with a mod
+Error: tuple expected
 |}]
 
 let%template _ : _ = () [@kind Foo]
@@ -368,7 +368,7 @@ let%template _ : _ = () [@kind Foo]
 [%%expect
   {|
 Line _, characters _-_:
-Error: expected a kind abbreviation, product of kinds, or kind with a mod
+Error: [ppx_template] syntax error: constructors are not allowed in template expressions
 |}]
 
 (* When [ppx_template] produces error nodes, be sure to mark any attributes in the dropped
@@ -637,4 +637,183 @@ let%template f x = x [@alloc stack_local]
 Line _, characters _-_:
 Error: Unbound template identifier [stack_local] of type [Alloc].
 Hint: Did you mean [stack]?
+|}]
+
+let%template f x = x [@@mode m = stack @ local]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Type mismatch" (kind expression) (value (Tuple stack local))
+         ("expected type" Mode)))
+|}]
+
+let%template f x = x [@@mode m = value mod global]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Type mismatch" (kind expression) (value (Mod value (global)))
+         ("expected type" Mode)))
+|}]
+
+let%template f x = x [@@mode m = (value & value)]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Type mismatch" (kind expression) (value (Product value value))
+         ("expected type" Mode)))
+|}]
+
+let%template f x = x
+[@@mode m = (value & value)] [@@alloc a = (value & value)] [@@kind k = heap @ global]
+;;
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        (("Type mismatch" (kind expression) (value (Tuple heap global))
+          ("expected type" Kind))
+         ("Type mismatch" (kind expression) (value (Product value value))
+          ("expected type" Mode))
+         ("Type mismatch" (kind expression) (value (Product value value))
+          ("expected type" (Alloc @ Mode)))))
+|}]
+
+let%template f = (f [@mode (value & value) (value mod portable)])
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        (("Type mismatch" (kind expression) (value (Product value value))
+          ("expected type" Mode))
+         ("Type mismatch" (kind expression) (value (Mod value (portable)))
+          ("expected type" Mode))))
+|}]
+
+module%template _ = struct
+  [@@@mode m = local]
+  [@@@kind k = m]
+
+  type t : k
+end
+
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unknown layout m
+|}]
+
+module type%template _T = sig
+  val f : t [@@zero_alloc_if_local (value mod local) opt]
+end
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ident expected
+|}]
+
+let%template f x = x [@@mode a @ m = stack @ local]
+
+
+[%%expect {| |}]
+
+let%template f x = x [@@mode a = (stack @ local, heap)]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Type mismatch" (kind expression) (value (Tuple stack local))
+         ("expected type" Mode)))
+|}]
+
+let%template f x = x [@@alloc a = (stack, heap @ global)]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [stack] of type [(Alloc @ Mode)].
+Hint: Did you mean [stack_local]?
+|}]
+
+let%template f x = x [@@kind a = stack]
+
+
+[%%expect {| |}]
+
+let%template f x = x [@@mode (a, b) = (local, global)]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [local] of type [(Tuple Mode Mode)].
+|}]
+
+let%template f x = x [@@mode (a, b) = ((local, local), global)]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [global] of type [(Tuple Mode Mode)].
+|}]
+
+let%template f x = x [@@mode a = ((local, local), global)]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Type mismatch" (kind expression) (value (Tuple local local))
+         ("expected type" Mode)))
+|}]
+
+let%template f x = x [@@mode a = ((local, local), (global, global))]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Type mismatch" (kind expression) (value (Tuple local local))
+         ("expected type" Mode)))
+|}]
+
+let%template f x = x [@exclave_if_stack a2]
+[@@alloc (a1, a2) = ((heap, stack), (stack, heap))]
+;;
+
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [a2] of type [Alloc].
+Hint: There is a template identifier [a2] in scope with type [Mode].
+|}]
+
+let%template f x = x [@@mode (m1, m2, m3, m4) = ((m1, m2), (m3, m4))]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Tuple length mismatch" (kind expression) (value (Tuple m1 m2))
+         ("expected type" (Tuple Mode Mode Mode Mode))))
+|}]
+
+let%template f x = x [@@mode (m1, m2) = (((m1, m2), (m3, m4)), ((m5, m6), (m7, m8)))]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Type mismatch" (kind expression) (value (Tuple m1 m2))
+         ("expected type" Mode)))
 |}]

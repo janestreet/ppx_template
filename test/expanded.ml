@@ -1,4 +1,4 @@
-open! Core
+open! Ppx_template_test_common
 
 [@@@disable_unused_warnings]
 
@@ -33,28 +33,58 @@ module _ : sig
   val x : string
 
   include sig
+    [@@@ocaml.text "/*"]
+
     val x__a : string
 
-    include sig
-      val x__a__c : string
-    end
+    [@@@ocaml.text "/*"]
 
     include sig
-      val x__a__d : string
+      [@@@ocaml.text "/*"]
+
+      val x__a__c : string
+
+      [@@@ocaml.text "/*"]
     end
+    [@@ocaml.doc " @inline "]
+
+    include sig
+      [@@@ocaml.text "/*"]
+
+      val x__a__d : string
+
+      [@@@ocaml.text "/*"]
+    end
+    [@@ocaml.doc " @inline "]
   end
+  [@@ocaml.doc " @inline "]
 
   include sig
+    [@@@ocaml.text "/*"]
+
     val x__b : string
 
-    include sig
-      val x__b__c : string
-    end
+    [@@@ocaml.text "/*"]
 
     include sig
-      val x__b__d : string
+      [@@@ocaml.text "/*"]
+
+      val x__b__c : string
+
+      [@@@ocaml.text "/*"]
     end
+    [@@ocaml.doc " @inline "]
+
+    include sig
+      [@@@ocaml.text "/*"]
+
+      val x__b__d : string
+
+      [@@@ocaml.text "/*"]
+    end
+    [@@ocaml.doc " @inline "]
   end
+  [@@ocaml.doc " @inline "]
 end = struct
   let x = "not duplicated"
 
@@ -63,24 +93,24 @@ end = struct
 
     include struct
       let x__a__c = "duplicated four times"
-    end
+    end [@@ocaml.doc " @inline "]
 
     include struct
       let x__a__d = "duplicated four times"
-    end
-  end
+    end [@@ocaml.doc " @inline "]
+  end [@@ocaml.doc " @inline "]
 
   include struct
     let x__b = "duplicated twice"
 
     include struct
       let x__b__c = "duplicated four times"
-    end
+    end [@@ocaml.doc " @inline "]
 
     include struct
       let x__b__d = "duplicated four times"
-    end
-  end
+    end [@@ocaml.doc " @inline "]
+  end [@@ocaml.doc " @inline "]
 end
 
 [@@@end]
@@ -125,51 +155,59 @@ module _ = struct
     let x = "x"
   end
 
-  include struct
-    module T__a = struct
-      type t = string
+  module T__a = struct
+    type t = string
 
-      let x = "x"
-    end
+    let x = "x"
+  end
 
-    module T__b = struct
-      type t = string
+  module T__b = struct
+    type t = string
 
-      let x = "x"
-    end
+    let x = "x"
   end
 
   module _ : sig
     include sig
       open T
 
+      [@@@ocaml.text "/*"]
+
       val x__a : string
+
+      [@@@ocaml.text "/*"]
     end
+    [@@ocaml.doc " @inline "]
 
     include sig
       open T
 
+      [@@@ocaml.text "/*"]
+
       val x__b : string
+
+      [@@@ocaml.text "/*"]
     end
+    [@@ocaml.doc " @inline "]
   end = struct
     include struct
       open T__a
 
       let x__a = x
-    end
+    end [@@ocaml.doc " @inline "]
 
     include struct
       open T__b
 
       let x__b = x
-    end
+    end [@@ocaml.doc " @inline "]
   end
 end
 
 [@@@end]
 
 [@@@expand_inline
-  let x = {| %%template gets inlined, but individual items may be wrapped in [include] |}
+  let x = {| %%template gets inlined |}
 
   module _ : sig
     [%%template:
@@ -191,27 +229,35 @@ end
     module Quux = Unit [@@mode m = (global, local)]]
   end]
 
-let x = {| %%template gets inlined, but individual items may be wrapped in [include] |}
+let x = {| %%template gets inlined |}
 
 module _ : sig
   type foo := unit
   and foo__local := unit
 
-  include sig
-    val bar : unit
-    val bar__local : unit
-  end
+  val bar : unit
 
-  include sig
-    module type Baz := sig end
+  [@@@ocaml.text "/*"]
 
-    module type Baz__local := sig end
-  end
+  val bar__local : unit
 
-  include sig
-    module Quux = Unit
-    module Quux__local = Unit
-  end
+  [@@@ocaml.text "/*"]
+
+  module type Baz := sig end
+
+  [@@@ocaml.text "/*"]
+
+  module type Baz__local := sig end
+
+  [@@@ocaml.text "/*"]
+
+  module Quux = Unit
+
+  [@@@ocaml.text "/*"]
+
+  module Quux__local = Unit
+
+  [@@@ocaml.text "/*"]
 end = struct
   type foo = unit
   and foo__local = unit
@@ -219,15 +265,11 @@ end = struct
   let bar = ()
   and bar__local = ()
 
-  include struct
-    module type Baz = sig end
-    module type Baz__local = sig end
-  end
+  module type Baz = sig end
+  module type Baz__local = sig end
 
-  include struct
-    module Quux = Unit
-    module Quux__local = Unit
-  end
+  module Quux = Unit
+  module Quux__local = Unit
 end
 
 [@@@end]
@@ -321,26 +363,24 @@ end
 
 let x = {| zero_alloc_if_local attributes are inserted as appropriate |}
 
-include struct
-  module M : sig
-    val foo : unit -> unit
-    val bar : unit -> unit
-    val baz : unit -> unit
-  end = struct
-    let foo () = ()
-    let bar () = ()
-    let baz () = bar ()
-  end
+module M : sig
+  val foo : unit -> unit
+  val bar : unit -> unit
+  val baz : unit -> unit
+end = struct
+  let foo () = ()
+  let bar () = ()
+  let baz () = bar ()
+end
 
-  module M__local : sig
-    val foo : unit -> unit [@@zero_alloc]
-    val bar : unit -> unit [@@zero_alloc opt]
-    val baz : unit -> unit [@@zero_alloc opt arity 1]
-  end = struct
-    let foo () = () [@@zero_alloc]
-    let bar () = () [@@zero_alloc opt]
-    let baz () = (bar [@zero_alloc assume]) ()
-  end
+module M__local : sig
+  val foo : unit -> unit [@@zero_alloc]
+  val bar : unit -> unit [@@zero_alloc opt]
+  val baz : unit -> unit [@@zero_alloc opt arity 1]
+end = struct
+  let foo () = () [@@zero_alloc]
+  let bar () = () [@@zero_alloc opt]
+  let baz () = (bar [@zero_alloc assume]) ()
 end
 
 [@@@end]
@@ -358,5 +398,210 @@ let id__local x = x
 and id__local__stack x = x
 and id x = x
 and id__stack x = x
+
+[@@@end]
+
+[@@@expand_inline
+  let x = {| name mangling excludes an axis if every element is default |}
+
+  module _ : sig
+    val%template foo : unit
+    [@@mode
+      m = (global, local)
+      , n = (nonportable, portable)
+      , o = (global, local)
+      , p = (nonportable, portable)]
+  end = struct
+    let%template foo = ()
+    [@@mode
+      m = (global, local)
+      , n = (nonportable, portable)
+      , o = (global, local)
+      , p = (nonportable, portable)]
+    ;;
+  end]
+
+let x = {| name mangling excludes an axis if every element is default |}
+
+module _ : sig
+  val foo : unit
+
+  [@@@ocaml.text "/*"]
+
+  val foo__nonportable__portable : unit
+  val foo__global__local : unit
+  val foo__global__nonportable__local__portable : unit
+  val foo__portable__nonportable : unit
+  val foo__portable__portable : unit
+  val foo__global__portable__local__nonportable : unit
+  val foo__global__portable__local__portable : unit
+  val foo__local__global : unit
+  val foo__local__nonportable__global__portable : unit
+  val foo__local__local : unit
+  val foo__local__nonportable__local__portable : unit
+  val foo__local__portable__global__nonportable : unit
+  val foo__local__portable__global__portable : unit
+  val foo__local__portable__local__nonportable : unit
+  val foo__local__portable__local__portable : unit
+
+  [@@@ocaml.text "/*"]
+end = struct
+  let foo = ()
+  and foo__nonportable__portable = ()
+  and foo__global__local = ()
+  and foo__global__nonportable__local__portable = ()
+  and foo__portable__nonportable = ()
+  and foo__portable__portable = ()
+  and foo__global__portable__local__nonportable = ()
+  and foo__global__portable__local__portable = ()
+  and foo__local__global = ()
+  and foo__local__nonportable__global__portable = ()
+  and foo__local__local = ()
+  and foo__local__nonportable__local__portable = ()
+  and foo__local__portable__global__nonportable = ()
+  and foo__local__portable__global__portable = ()
+  and foo__local__portable__local__nonportable = ()
+  and foo__local__portable__local__portable = ()
+end
+
+[@@@end]
+
+let x = {|doc comment hiding for module includes|}
+
+[@@@expand_inline
+  module type S = [%template:
+  module N : sig
+    [@@@kind.default k = (value, bits64, float64)]
+
+    module type O = sig
+      type t
+    end
+  end
+
+  [@@@kind.default k = (value, bits64, float64)]
+
+  module type M = sig
+    type t
+  end
+
+  include M [@kind k]
+  include N.O [@kind k]
+  include M [@kind k] with type t := int
+  include N.O [@kind k] with type t := int]]
+
+module type S = sig
+  module N : sig
+    include sig
+      module type O = sig
+        type t
+      end
+    end
+    [@@ocaml.doc " @inline "]
+
+    include sig
+      [@@@ocaml.text "/*"]
+
+      module type O__bits64 = sig
+        type t
+      end
+
+      [@@@ocaml.text "/*"]
+    end
+    [@@ocaml.doc " @inline "]
+
+    include sig
+      [@@@ocaml.text "/*"]
+
+      module type O__float64 = sig
+        type t
+      end
+
+      [@@@ocaml.text "/*"]
+    end
+    [@@ocaml.doc " @inline "]
+  end
+
+  include sig
+    module type M = sig
+      type t
+    end
+
+    include M
+    include N.O
+    include M with type t := int
+    include N.O with type t := int
+  end
+  [@@ocaml.doc " @inline "]
+
+  include sig
+    [@@@ocaml.text "/*"]
+
+    module type M__bits64 = sig
+      type t
+    end
+
+    [@@@ocaml.text "/*"]
+
+    [@@@ocaml.text "/*"]
+
+    include M__bits64
+
+    [@@@ocaml.text "/*"]
+
+    [@@@ocaml.text "/*"]
+
+    include N.O__bits64
+
+    [@@@ocaml.text "/*"]
+
+    [@@@ocaml.text "/*"]
+
+    include M__bits64 with type t := int
+
+    [@@@ocaml.text "/*"]
+
+    [@@@ocaml.text "/*"]
+
+    include N.O__bits64 with type t := int
+
+    [@@@ocaml.text "/*"]
+  end
+  [@@ocaml.doc " @inline "]
+
+  include sig
+    [@@@ocaml.text "/*"]
+
+    module type M__float64 = sig
+      type t
+    end
+
+    [@@@ocaml.text "/*"]
+
+    [@@@ocaml.text "/*"]
+
+    include M__float64
+
+    [@@@ocaml.text "/*"]
+
+    [@@@ocaml.text "/*"]
+
+    include N.O__float64
+
+    [@@@ocaml.text "/*"]
+
+    [@@@ocaml.text "/*"]
+
+    include M__float64 with type t := int
+
+    [@@@ocaml.text "/*"]
+
+    [@@@ocaml.text "/*"]
+
+    include N.O__float64 with type t := int
+
+    [@@@ocaml.text "/*"]
+  end
+  [@@ocaml.doc " @inline "]
+end
 
 [@@@end]

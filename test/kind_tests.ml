@@ -1,4 +1,4 @@
-open! Core
+open! Ppx_template_test_common
 
 module%test [@name "no [kind] annotation"] _ = struct
   module Id : sig
@@ -8,8 +8,9 @@ module%test [@name "no [kind] annotation"] _ = struct
   end
 
   let%test_unit "value" =
-    Quickcheck.iter [%quickcheck.generator: float] ~f:(fun x ->
-      [%test_result: float] (Id.id x) ~expect:x)
+    List.iter
+      Generate.(list float)
+      ~f:(fun x -> [%test_result: float] (Id.id x) ~expect:x)
   ;;
 end
 
@@ -21,8 +22,9 @@ module%test [@name "empty [kind] annotations"] _ = struct
   end
 
   let%test_unit "value" =
-    Quickcheck.iter [%quickcheck.generator: float] ~f:(fun x ->
-      [%test_result: float] (Id.id x) ~expect:x)
+    List.iter
+      Generate.(list float)
+      ~f:(fun x -> [%test_result: float] (Id.id x) ~expect:x)
   ;;
 end
 
@@ -34,15 +36,18 @@ module%test [@name "single kind variable"] _ = struct
   end
 
   let%test_unit "value" =
-    Quickcheck.iter [%quickcheck.generator: float] ~f:(fun x ->
-      [%test_result: float] (Id.id x) ~expect:x)
+    List.iter
+      Generate.(list float)
+      ~f:(fun x -> [%test_result: float] (Id.id x) ~expect:x)
   ;;
 
   let%test_unit "float64" =
-    Quickcheck.iter [%quickcheck.generator: float] ~f:(fun x ->
-      [%test_result: float]
-        (Float_u.to_float (Id.id__float64 (Float_u.of_float x)))
-        ~expect:x)
+    List.iter
+      Generate.(list float)
+      ~f:(fun x ->
+        [%test_result: float]
+          (Float_u.to_float (Id.id__float64 (Float_u.of_float x)))
+          ~expect:x)
   ;;
 end
 
@@ -57,28 +62,37 @@ module%test [@name "multiple kind variables"] _ = struct
   end
 
   let%test_unit "value value" =
-    Quickcheck.iter [%quickcheck.generator: float * float] ~f:(fun (x, y) ->
-      [%test_result: float] (Const.const x y) ~expect:x)
+    List.iter
+      Generate.(list (tuple float float))
+      ~f:(fun (x, y) -> [%test_result: float] (Const.const x y) ~expect:x)
   ;;
 
   let%test_unit "value float64" =
-    Quickcheck.iter [%quickcheck.generator: float * float] ~f:(fun (x, y) ->
-      [%test_result: float] (Const.const__value__float64 x (Float_u.of_float y)) ~expect:x)
+    List.iter
+      Generate.(list (tuple float float))
+      ~f:(fun (x, y) ->
+        [%test_result: float]
+          (Const.const__value__float64 x (Float_u.of_float y))
+          ~expect:x)
   ;;
 
   let%test_unit "float64 value" =
-    Quickcheck.iter [%quickcheck.generator: float * float] ~f:(fun (x, y) ->
-      [%test_result: float]
-        (Float_u.to_float (Const.const__float64__value (Float_u.of_float x) y))
-        ~expect:x)
+    List.iter
+      Generate.(list (tuple float float))
+      ~f:(fun (x, y) ->
+        [%test_result: float]
+          (Float_u.to_float (Const.const__float64__value (Float_u.of_float x) y))
+          ~expect:x)
   ;;
 
   let%test_unit "float64 float64" =
-    Quickcheck.iter [%quickcheck.generator: float * float] ~f:(fun (x, y) ->
-      [%test_result: float]
-        (Float_u.to_float
-           (Const.const__float64__float64 (Float_u.of_float x) (Float_u.of_float y)))
-        ~expect:x)
+    List.iter
+      Generate.(list (tuple float float))
+      ~f:(fun (x, y) ->
+        [%test_result: float]
+          (Float_u.to_float
+             (Const.const__float64__float64 (Float_u.of_float x) (Float_u.of_float y)))
+          ~expect:x)
   ;;
 end
 
@@ -169,16 +183,22 @@ module%test [@name "recursive"] _ = struct
   end
 
   let%test_unit "value" =
-    Quickcheck.iter [%quickcheck.generator: float] ~f:(fun x ->
-      [%test_result: float] (Apply_n_times.apply_n_times ~n:2 Float.neg x) ~expect:x)
+    List.iter
+      Generate.(list float)
+      ~f:(fun x ->
+        [%test_result: float]
+          (Apply_n_times.apply_n_times ~n:2 Stdlib.Float.neg x)
+          ~expect:x)
   ;;
 
   let%test_unit "float64" =
-    Quickcheck.iter [%quickcheck.generator: float] ~f:(fun x ->
-      [%test_result: float]
-        (Float_u.to_float
-           (Apply_n_times.apply_n_times__float64 ~n:2 Float_u.neg (Float_u.of_float x)))
-        ~expect:x)
+    List.iter
+      Generate.(list float)
+      ~f:(fun x ->
+        [%test_result: float]
+          (Float_u.to_float
+             (Apply_n_times.apply_n_times__float64 ~n:2 Float_u.neg (Float_u.of_float x)))
+          ~expect:x)
   ;;
 end
 
@@ -197,44 +217,52 @@ module%test [@name "multiple bindings"] _ = struct
   end
 
   let%test_unit "value value" =
-    Quickcheck.iter [%quickcheck.generator: float * float] ~f:(fun (x, y) ->
-      [%test_result: float] (Fn.const x y) ~expect:x;
-      [%test_result: float] (Fn.drop x y) ~expect:y)
+    List.iter
+      Generate.(list (tuple float float))
+      ~f:(fun (x, y) ->
+        [%test_result: float] (Fn.const x y) ~expect:x;
+        [%test_result: float] (Fn.drop x y) ~expect:y)
   ;;
 
   let%test_unit "value float64" =
-    Quickcheck.iter [%quickcheck.generator: float * float] ~f:(fun (x, y) ->
-      [%test_result: float] (Fn.const__value__float64 x (Float_u.of_float y)) ~expect:x;
-      [%test_result: float]
-        (Float_u.to_float (Fn.drop__value__float64 x (Float_u.of_float y)))
-        ~expect:y)
+    List.iter
+      Generate.(list (tuple float float))
+      ~f:(fun (x, y) ->
+        [%test_result: float] (Fn.const__value__float64 x (Float_u.of_float y)) ~expect:x;
+        [%test_result: float]
+          (Float_u.to_float (Fn.drop__value__float64 x (Float_u.of_float y)))
+          ~expect:y)
   ;;
 
   let%test_unit "float64 value" =
-    Quickcheck.iter [%quickcheck.generator: float * float] ~f:(fun (x, y) ->
-      [%test_result: float]
-        (Float_u.to_float (Fn.const__float64__value (Float_u.of_float x) y))
-        ~expect:x;
-      [%test_result: float] (Fn.drop__float64__value (Float_u.of_float x) y) ~expect:y)
+    List.iter
+      Generate.(list (tuple float float))
+      ~f:(fun (x, y) ->
+        [%test_result: float]
+          (Float_u.to_float (Fn.const__float64__value (Float_u.of_float x) y))
+          ~expect:x;
+        [%test_result: float] (Fn.drop__float64__value (Float_u.of_float x) y) ~expect:y)
   ;;
 
   let%test_unit "float64 float64" =
-    Quickcheck.iter [%quickcheck.generator: float * float] ~f:(fun (x, y) ->
-      [%test_result: float]
-        (Float_u.to_float
-           (Fn.const__float64__float64 (Float_u.of_float x) (Float_u.of_float y)))
-        ~expect:x;
-      [%test_result: float]
-        (Float_u.to_float
-           (Fn.drop__float64__float64 (Float_u.of_float x) (Float_u.of_float y)))
-        ~expect:y)
+    List.iter
+      Generate.(list (tuple float float))
+      ~f:(fun (x, y) ->
+        [%test_result: float]
+          (Float_u.to_float
+             (Fn.const__float64__float64 (Float_u.of_float x) (Float_u.of_float y)))
+          ~expect:x;
+        [%test_result: float]
+          (Float_u.to_float
+             (Fn.drop__float64__float64 (Float_u.of_float x) (Float_u.of_float y)))
+          ~expect:y)
   ;;
 end
 
 module%test [@name "miscellaneous mangling behavior"] _ = struct
   let%expect_test "[@kind] on expressions" =
     let open struct
-      let%template x = String.rtake_while __FUNCTION__ ~f:(Char.( <> ) '.')
+      let%template x = String.split_on_char ~sep:'.' __FUNCTION__ |> List.rev |> List.hd
       [@@kind k = (value, float64)]
       ;;
 
@@ -257,6 +285,10 @@ module%test [@name "miscellaneous mangling behavior"] _ = struct
        regardless of whether it was [@@kind] or not. But, we also allow "polymorphic"
        bindings of kind [value]. *)
   module%test [@name "doesn't complain about misc. let-bindings"] _ = struct
+    module Nothing = struct
+      type t = |
+    end
+
     let%template (None : Nothing.t option) = None
     let%template[@kind value] (None : Nothing.t option) = None
   end
@@ -265,25 +297,29 @@ end
 module%test [@name "expression extension"] _ = struct
   let%test_unit "polymorphic binding + monomorphize" =
     let%template id (type a) (x : a) = x [@@kind k = (value, float64)] in
-    Quickcheck.iter [%quickcheck.generator: float] ~f:(fun x ->
-      [%test_result: float] ((id [@kind value]) x) ~expect:x;
-      [%test_result: float]
-        (Float_u.to_float ((id [@kind float64]) (Float_u.of_float x)))
-        ~expect:x)
+    List.iter
+      Generate.(list float)
+      ~f:(fun x ->
+        [%test_result: float] ((id [@kind value]) x) ~expect:x;
+        [%test_result: float]
+          (Float_u.to_float ((id [@kind float64]) (Float_u.of_float x)))
+          ~expect:x)
   ;;
 
   let%test_unit "just monomorphize" =
     let open struct
       let%template id (type a) (x : a) = x [@@kind k = (value, float64)]
     end in
-    Quickcheck.iter [%quickcheck.generator: float] ~f:(fun x ->
-      (* It is intentional that the first [%template] wraps a [Pexp_apply] while the
-           second wraps a [Pexp_ident] - this demonstrates how [%template] is valid for
-           all expression contexts. *)
-      [%test_result: float] [%template (id [@kind value]) x] ~expect:x;
-      [%test_result: float]
-        (Float_u.to_float ([%template id [@kind float64]] (Float_u.of_float x)))
-        ~expect:x)
+    List.iter
+      Generate.(list float)
+      ~f:(fun x ->
+        (* It is intentional that the first [%template] wraps a [Pexp_apply] while the
+         second wraps a [Pexp_ident] - this demonstrates how [%template] is valid for
+         all expression contexts. *)
+        [%test_result: float] [%template (id [@kind value]) x] ~expect:x;
+        [%test_result: float]
+          (Float_u.to_float ([%template id [@kind float64]] (Float_u.of_float x)))
+          ~expect:x)
   ;;
 end
 
@@ -298,8 +334,8 @@ module%test [@name "module extensions"] _ = struct
     let id_u = (id [@kind float64])]
 
   let%expect_test "monomorphize" =
-    Quickcheck.iter
-      [%quickcheck.generator: float]
+    List.iter
+      Generate.(list float)
       ~f:
         (fun%template x ->
           [%test_eq: float] (Id.id_b x) ((Id.id [@kind value]) x);
@@ -326,14 +362,16 @@ module%test [@name "module bindings"] _ = struct
 
   let%test_unit "id" =
     (* Unfortunately, [Ppxlib] doesn't currently support [Pexp_letmodule] expressions as
-         an attribute context, and they don't have their own [module_binding] nodes,
-         unlike [Pexp_let] and its [Value_bindings], so we can't easily support [@@kind]
-         on them. *)
+       an attribute context, and they don't have their own [module_binding] nodes,
+       unlike [Pexp_let] and its [Value_bindings], so we can't easily support [@@kind]
+       on them. *)
     let module%template Id_b = M.Id [@kind value] in
     let module%template Id_u = M.Id [@kind float64] in
-    Quickcheck.iter [%quickcheck.generator: float] ~f:(fun x ->
-      [%test_result: float] (Id_b.f x) ~expect:x;
-      [%test_result: float] (Float_u.to_float (Id_u.f (Float_u.of_float x))) ~expect:x)
+    List.iter
+      Generate.(list float)
+      ~f:(fun x ->
+        [%test_result: float] (Id_b.f x) ~expect:x;
+        [%test_result: float] (Float_u.to_float (Id_u.f (Float_u.of_float x))) ~expect:x)
   ;;
 end
 
@@ -344,9 +382,11 @@ module%test [@name "type extension"] _ = struct
   let id_u : [%template: ('a id[@kind float64])] = fun x -> x
 
   let%test_unit "id" =
-    Quickcheck.iter [%quickcheck.generator: float] ~f:(fun x ->
-      [%test_result: float] (id_b x) ~expect:x;
-      [%test_result: float] (Float_u.to_float (id_u (Float_u.of_float x))) ~expect:x)
+    List.iter
+      Generate.(list float)
+      ~f:(fun x ->
+        [%test_result: float] (id_b x) ~expect:x;
+        [%test_result: float] (Float_u.to_float (id_u (Float_u.of_float x))) ~expect:x)
   ;;
 end
 
@@ -359,9 +399,11 @@ module%test [@name "type declarations"] _ = struct
   end
 
   let%test_unit "id" =
-    Quickcheck.iter [%quickcheck.generator: float] ~f:(fun x ->
-      [%test_result: float] (M.id_b x) ~expect:x;
-      [%test_result: float] (Float_u.to_float (M.id_u (Float_u.of_float x))) ~expect:x)
+    List.iter
+      Generate.(list float)
+      ~f:(fun x ->
+        [%test_result: float] (M.id_b x) ~expect:x;
+        [%test_result: float] (Float_u.to_float (M.id_u (Float_u.of_float x))) ~expect:x)
   ;;
 end
 
@@ -383,9 +425,11 @@ module%test [@name "module declarations"] _ = struct
   let%test_unit "id" =
     let module%template M_b = M [@kind value] in
     let module%template M_u = M [@kind float64] in
-    Quickcheck.iter [%quickcheck.generator: float] ~f:(fun x ->
-      [%test_result: float] (M_b.id x) ~expect:x;
-      [%test_result: float] (Float_u.to_float (M_u.id (Float_u.of_float x))) ~expect:x)
+    List.iter
+      Generate.(list float)
+      ~f:(fun x ->
+        [%test_result: float] (M_b.id x) ~expect:x;
+        [%test_result: float] (Float_u.to_float (M_u.id (Float_u.of_float x))) ~expect:x)
   ;;
 end
 
@@ -398,8 +442,8 @@ struct
   ;;
 
   let%test_unit "value bits32" =
-    Quickcheck.iter
-      [%quickcheck.generator: float * int32]
+    List.iter
+      Generate.(list (tuple float int32))
       ~f:
         (fun%template (x, y) ->
           [%test_result: float]
@@ -411,8 +455,8 @@ struct
   ;;
 
   let%test_unit "value bits64" =
-    Quickcheck.iter
-      [%quickcheck.generator: float * int64]
+    List.iter
+      Generate.(list (tuple float int64))
       ~f:
         (fun%template (x, y) ->
           [%test_result: float]
@@ -424,8 +468,8 @@ struct
   ;;
 
   let%test_unit "float64 bits32" =
-    Quickcheck.iter
-      [%quickcheck.generator: float * int32]
+    List.iter
+      Generate.(list (tuple float int32))
       ~f:
         (fun%template (x, y) ->
           [%test_result: float]
@@ -437,8 +481,8 @@ struct
   ;;
 
   let%test_unit "float64 bits32" =
-    Quickcheck.iter
-      [%quickcheck.generator: float * int64]
+    List.iter
+      Generate.(list (tuple float int64))
       ~f:
         (fun%template (x, y) ->
           [%test_result: float]

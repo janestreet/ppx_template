@@ -1,5 +1,5 @@
 (library
  (name ppx_template_test)
- (libraries core unboxed.float_u unboxed.int32_u unboxed.int64_u)
+ (libraries ppx_template_test_common)
  (preprocess
   (pps ppx_jane)))

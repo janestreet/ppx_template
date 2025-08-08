@@ -231,7 +231,7 @@ avoiding dependence on the particular mangling mechanism `ppx_template` uses as 
 in the future.
 
 ```ocaml
-let%template flip (type (a : k) (b : k) (c : k)) (f : (a -> b -> c) @@ p) = fun x y -> f y x
+let%template flip (type (a : k) (b : k) (c : k)) (f : (a -> b -> c) @ p) = fun x y -> f y x
 [@@mode p = (nonportable, portable)]
 [@@kind k = (bits32, bits64)]
 
@@ -318,49 +318,49 @@ end
 
 ### Grammar
 
+Helper grammars:
+```
+tuple<x> ::=
+| "(" x ("," x)+ ")"
+| "(" x "@" x ")"
+
+identifier ::= (valid ocaml variable identifier)
+```
+
 Grammar of poly-attribute payloads:
 ```
 # e.g. let f x = x [@@kind k1 = bits32, k2 = (value, bits32)] [@@mode local local]
-poly<t> ::= simple-bindings<t> | punned-bindings<t>
+poly ::= simple-bindings | punned-bindings
 
-simple-bindings<t> ::= nil | simple-binding<t> ("," simple-binding<t>)*
+simple-bindings ::= nil | simple-binding ("," simple-binding)*
 
-simple-binding<t> ::= pattern<t> "=" expressions<t>
+simple-binding ::= pattern "=" expressions
 
-punned-bindings<t> ::= expression<t>*
+punned-bindings ::= expression*
 ```
 
 Grammar of mono-attribute payloads:
 ```
 # e.g. let x = (f [@kind value bits32])
-mono<t> ::= expression<t>*
+mono ::= expression*
 ```
 
 Patterns:
 ```
-pattern<mode | modality | kind | alloc> ::= identifier
-
-pattern<alloc_at_mode> ::= pattern<alloc> "@" pattern<mode>
+pattern ::=
+| identifier
+| tuple<identifier>
 ```
 
 Expressions:
 ```
-expressions<t> ::= expression<t> | "(" expression<t> ("," expression<t>)* ")"
+expressions ::= expression | "(" expression ("," expression)+ ")"
 
-expression<mode> ::= identifier
-
-expression<modality> ::= identifier
-
-expression<kind> ::=
+expression ::=
 | identifier
-| expression<kind> ("&" expression<kind>)+
-| expression<kind> "mod" expression<mode>+
-
-expression<alloc> ::= identifier
-
-expression<alloc_at_mode> ::=
-| identifier
-| identifier "@" identifier
+| expression ("&" expression)+
+| expression "mod" expression+
+| tuple<expression>
 ```
 
 # Axes
@@ -515,6 +515,33 @@ As with mode-polymorphism, the `[@@zero_alloc_if_stack a args...]` attribute con
 attaches a `[@@zero_alloc args...]` attribute to a syntax node when `a = stack`. This is the
 preferred attribute over `[@@zero_alloc_if_local]` as conditionally being zero-alloc is
 a property of allocation behavior, not of modes.
+
+## Tuples
+
+It is occasionally useful to have two template variables correlated rather than templating over the full
+cartesian product of their ranges. You can do this via tuple templates:
+
+```ocaml
+[%%template
+module Delay : sig
+type 'a t = unit -> 'a
+
+val return : ('a : value mod c). 'a @ p -> 'a t @ p
+end = struct
+type 'a t = unit -> 'a
+
+let return x () = x
+end
+[@@mode (p, c) = ((nonportable, uncontended), (portable, contended))]]
+
+(* resulting bindings are referenced by the first element of the tuple only *)
+
+module _ = Delay [@mode nonportable]
+module _ = Delay [@mode portable]
+```
+
+For axis (besides `alloc`), the pattern and expressions can both be either elements of that axis, or a tuple
+of elements of that axis. We do not support nested tuples.
 
 # The [%template.portable] extension {#template-portable}
 
@@ -682,8 +709,8 @@ Line 7, characters 36-37:
 Error: Unbound type constructor t__bits64
 ```
 
-Module type substitutions are supported, but are more constrained by the limitation
-described above. This is fine:
+Module type substitutions are supported, but are constrained by the same limitation
+described above. These are fine:
 
 ```ocaml
 module type%template A = sig
@@ -692,20 +719,14 @@ module type%template A = sig
   module type S := sig end
   module type S = S [@kind k]
 end
-```
 
-But these are not:
-
-```ocaml
 module type B = sig
   module type%template S := sig end [@@kind k = (bits64, float64)]
   module type%template S = S [@kind k] [@@kind k = (bits64, float64)]
 end
 ```
-```mdx-error
-Line 3, characters 30-31:
-Error: Unbound module type S__bits64
-```
+
+But this is not:
 
 ```ocaml
 module type C = sig

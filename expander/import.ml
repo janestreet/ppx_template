@@ -1,17 +1,7 @@
 include struct
   open Ppxlib
   include Ast
-
-  module Ast_pattern = struct
-    include Ast_pattern
-
-    (* [fix f] computes the fixpoint of [f]. *)
-    let fix f =
-      let rec t ctx loc x k = (to_func (f (of_func t))) ctx loc x k in
-      f (of_func t)
-    ;;
-  end
-
+  module Ast_pattern = Ast_pattern
   module Attribute = Attribute
   module Context_free = Context_free
   module Driver = Driver
@@ -39,3 +29,6 @@ include struct
   module Sexp = Sexp
   include Sexp_conv
 end
+
+(* Re-export from [Import] to shadow [Result] from [open Stdppx] *)
+module Result = Result

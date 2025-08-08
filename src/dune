@@ -2,6 +2,6 @@
  (name ppx_template)
  (public_name ppx_template)
  (kind ppx_rewriter)
- (libraries compiler-libs.common ppxlib ppxlib_jane sexplib0 ppxlib.stdppx)
+ (libraries ppx_template_expander ppxlib ppxlib_jane ppxlib.stdppx)
  (preprocess
   (pps ppxlib.metaquot)))

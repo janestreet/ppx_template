@@ -1,11 +1,45 @@
 open! Stdppx
 open! Import
-open Language
+open Language.Typed
 
 module Definitions = struct
   module Poly = struct
-    type t = Poly : 'mangle Type.t * ('a, 'mangle) Binding.t list -> t
+    type 'mangle binding = Binding : (_, 'mangle) Binding.t -> 'mangle binding
+    type t = Poly : 'mangle Type.basic Axis.t * 'mangle Type.basic binding list -> t
   end
+
+  module Mono = struct
+    type t = Expression.Basic.packed Loc.t list Axis.Map.t
+  end
+
+  type poly_w =
+    [ `value_binding
+    | `value_description
+    | `module_binding
+    | `module_declaration
+    | `type_declaration
+    | `module_type_declaration
+    | `include_infos
+    ]
+
+  type mono_w =
+    [ `expression
+    | `module_expr
+    | `core_type
+    | `module_type
+    ]
+
+  type zero_alloc_if_w =
+    [ `expression
+    | `value_binding
+    | `value_description
+    ]
+
+  type any_w =
+    [ poly_w
+    | mono_w
+    | zero_alloc_if_w
+    ]
 
   module Context = struct
     type ('a, 'w) t =
@@ -22,6 +56,11 @@ module Definitions = struct
           (module_type_declaration, [> `module_type_declaration ]) t
       | Include_infos :
           ((module_expr, module_type) Either.t include_infos, [> `include_infos ]) t
+
+    type 'a poly = ('a, poly_w) t
+    type 'a mono = ('a, mono_w) t
+    type 'a zero_alloc_if = ('a, zero_alloc_if_w) t
+    type 'a any = ('a, any_w) t
   end
 end
 
@@ -30,38 +69,16 @@ module type Attributes = sig
     include Definitions
   end
 
-  type poly :=
-    [ `value_binding
-    | `value_description
-    | `module_binding
-    | `module_declaration
-    | `type_declaration
-    | `module_type_declaration
-    | `include_infos
-    ]
-
-  type mono :=
-    [ `expression
-    | `module_expr
-    | `core_type
-    | `module_type
-    ]
-
-  type zero_alloc_if :=
-    [ `expression
-    | `value_binding
-    | `value_description
-    ]
-
   module Context : sig
     include module type of struct
       include Context
     end
 
     type 'w packed = private T : (_, 'w) t -> 'w packed [@@unboxed]
-    type nonrec 'a poly = ('a, poly) t
-    type nonrec 'a mono = ('a, mono) t
-    type nonrec 'a zero_alloc_if = ('a, zero_alloc_if) t
+
+    val poly_to_any : 'a poly -> 'a any
+    val mono_to_any : 'a mono -> 'a any
+    val zero_alloc_if_to_any : 'a zero_alloc_if -> 'a any
   end
 
   (** A [('w, 'b) t] is a handler that knows how to consume a particular attribute on ['w]
@@ -74,6 +91,13 @@ module type Attributes = sig
       handler [t] strips its corresponding attributes from [item] in addition to producing
       its output. *)
   val consume : ('w, 'b) t -> ('a, 'w) Context.t -> 'a -> 'a * 'b
+
+  (** Like {!consume}, but propagates errors for easier monadic binding. *)
+  val consume_result
+    :  ('w, ('b, 'err) result) t
+    -> ('a, 'w) Context.t
+    -> 'a
+    -> ('a * 'b, 'err) result
 
   (** A map from [('a, 'w) Context.t] to [('a, 'b) Attribute.t]. *)
   module Attribute_map : sig
@@ -89,42 +113,54 @@ module type Attributes = sig
   (** A handler for attributes that make definitions/declarations polymorphic. Might
       return an [Error _] if the attribute's payload is malformed. Defaults to
       [Ok { kinds = None; modes = None }]. *)
-  val poly : (poly, (Poly.t list, Sexp.t) result) t
+  val poly : (poly_w, (Poly.t list, Sexp.t) result) t
 
   module Mono : sig
-    type t = Expression.Basic.packed Loc.t list Type.Map.t
+    include module type of struct
+      include Mono
+    end
 
-    val contexts : mono Context.packed list
-    val kind_attr : (mono, Expression.Basic.packed Loc.t list) Attribute_map.t
-    val mode_attr : (mono, Expression.Basic.packed Loc.t list) Attribute_map.t
-    val modality_attr : (mono, Expression.Basic.packed Loc.t list) Attribute_map.t
-    val alloc_attr : (mono, Expression.Basic.packed Loc.t list) Attribute_map.t
+    val contexts : mono_w Context.packed list
+
+    type attr :=
+      (mono_w, (Expression.Basic.packed Loc.t list, Sexp.t) result) Attribute_map.t
+
+    val kind_attr : attr
+    val mode_attr : attr
+    val modality_attr : attr
+    val alloc_attr : attr
   end
 
   (** A handler for attributes that mangle identifiers to the correct monomorphized name.
       Defaults to [{ kinds = []; modes = [] }]. *)
-  val mono : (mono, Mono.t) t
+  val mono : (mono_w, (Mono.t, Sexp.t) result) t
 
   (** A handler for attributes that optionally insert [exclave_] markers. We expect to
       replace these attributes with mode-polymorphic tailcalls and/or unboxed types. *)
-  val exclave_if_local : ([ `expression ], Type.mode Expression.t Loc.t option) t
+  val exclave_if_local
+    : ([ `expression ], (Type.mode Expression.t Loc.t option, Sexp.t) result) t
 
   (** Like {!exclave_if_local}, but for allocation identifiers. *)
-  val exclave_if_stack : ([ `expression ], Type.alloc Expression.t Loc.t option) t
+  val exclave_if_stack
+    : ([ `expression ], (Type.alloc Expression.t Loc.t option, Sexp.t) result) t
 
   (** A handler for attributes that optionally annotate code as zero-alloc. When the
       attribute is present, produces [Some (loc, mode, payload)], where [loc] is the
       location of the payload, [mode] is the mode to compare against, and [payload] is the
       payload to be given to the [[@@zero_alloc]] attribute. *)
   val zero_alloc_if_local
-    : ( zero_alloc_if
-        , (location * Type.mode Expression.t Loc.t * expression list) option )
+    : ( zero_alloc_if_w
+        , ( (location * Type.mode Expression.t Loc.t * expression list) option
+            , Sexp.t )
+            result )
         t
 
   (** Like {!zero_alloc_if_local}, but for allocation identifiers. *)
   val zero_alloc_if_stack
-    : ( zero_alloc_if
-        , (location * Type.alloc Expression.t Loc.t * expression list) option )
+    : ( zero_alloc_if_w
+        , ( (location * Type.alloc Expression.t Loc.t * expression list) option
+            , Sexp.t )
+            result )
         t
 
   module Floating : sig
@@ -148,6 +184,13 @@ module type Attributes = sig
         }
     end
 
-    val convert_poly : ('a, poly) Context.t -> 'a -> (Poly.t, Sexp.t) result option
+    (** Check if the provided ast node is a floating template attribute. Does not mark the
+        attribute as seen. *)
+    val is_present : ('a, poly) Context.t -> 'a -> bool
+
+    (** Check if the provided ast node is a floating template attribute, and evaluate its
+        contents. Marks the attribute as seen. Returns an [Error _] if the payload of the
+        attribute is malformed or inconsistent. *)
+    val convert_poly : ('a, poly) Context.t -> 'a -> (Poly.t option, Sexp.t) result
   end
 end

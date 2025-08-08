@@ -1,4 +1,4 @@
-open! Core
+open! Ppx_template_test_common
 
 (* It seems somewhat pointless to do something like duplicate all of the kind tests here,
    just with modes instead, since the ppx implementation itself doesn't really distinguish
@@ -75,10 +75,11 @@ module%template T : sig
   val of_char : char -> t
   val sexp_of_t : t -> Sexp.t
 end = struct
-  include Char
+  type t = Char.t
 
+  let%template[@mode m = (global, local)] compare = (compare_char [@mode m])
   let of_char t = t
-  let sexp_of_t = (sexp_of_t :> t -> _)
+  let sexp_of_t = (sexp_of_char :> t -> _)
 end
 
 let x = T.of_char 'x'

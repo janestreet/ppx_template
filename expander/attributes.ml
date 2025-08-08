@@ -2,6 +2,8 @@ open! Stdppx
 open! Import
 open Language
 include Attributes_intf.Definitions
+open Result.Let_syntax
+module Type = Language.Typed.Type
 
 module type Context = sig
   type ('a, 'w) t [@@immediate]
@@ -88,20 +90,28 @@ module Context = struct
 
   type 'w packed = T : (_, 'w) t -> 'w packed [@@unboxed]
 
-  type 'a poly =
-    ( 'a
-      , [ `value_binding
-        | `value_description
-        | `module_binding
-        | `module_declaration
-        | `type_declaration
-        | `module_type_declaration
-        | `include_infos
-        ] )
-      t
+  let poly_to_any : type a. a poly -> a any = function
+    | Value_binding -> Value_binding
+    | Value_description -> Value_description
+    | Module_binding -> Module_binding
+    | Module_declaration -> Module_declaration
+    | Type_declaration -> Type_declaration
+    | Module_type_declaration -> Module_type_declaration
+    | Include_infos -> Include_infos
+  ;;
 
-  type 'a mono = ('a, [ `expression | `module_expr | `core_type | `module_type ]) t
-  type 'a zero_alloc_if = ('a, [ `expression | `value_binding | `value_description ]) t
+  let mono_to_any : type a. a mono -> a any = function
+    | Expression -> Expression
+    | Module_expr -> Module_expr
+    | Core_type -> Core_type
+    | Module_type -> Module_type
+  ;;
+
+  let zero_alloc_if_to_any : type a. a zero_alloc_if -> a any = function
+    | Expression -> Expression
+    | Value_binding -> Value_binding
+    | Value_description -> Value_description
+  ;;
 
   let to_ppxlib : type a w. (a, w) t -> a Attribute.Context.t = function
     | Expression -> Expression
@@ -262,6 +272,12 @@ type ('w, 'b) t = { f : 'a. ('a, 'w) Context.t -> 'a -> 'a * 'b } [@@unboxed]
 
 let consume t ctx item = t.f ctx item
 
+let consume_result t ctx item =
+  match t.f ctx item with
+  | item, Ok value -> Ok (item, value)
+  | _item, (Error _ as err) -> err
+;;
+
 module Poly = struct
   include Poly
 
@@ -276,50 +292,14 @@ module Poly = struct
     ]
   ;;
 
-  let basic_pattern type_ expression_pat =
-    Ast_pattern_helpers.binding_poly
-      ~pattern_pat:(Ast_pattern_helpers.ident_pattern type_)
-      ~expression_pat
-      ~mangle:(fun value -> value)
-      ~mangle_type:type_
+  let declare name =
+    declare ~name ~contexts ~pattern:(Ast_pattern_helpers.bindings ()) ~k:Fn.id
   ;;
 
-  let declare_basic type_ expr_pat ~name =
-    declare ~name ~contexts ~pattern:(basic_pattern type_ expr_pat) ~k:Fn.id
-  ;;
-
-  let kind_attr = declare_basic Type.kind Ast_pattern_helpers.kind_expr ~name:"kind"
-
-  let mode_attr =
-    declare_basic Type.mode (Ast_pattern_helpers.ident_expr Type.mode) ~name:"mode"
-  ;;
-
-  let modality_attr =
-    declare_basic
-      Type.modality
-      (Ast_pattern_helpers.ident_expr Type.modality)
-      ~name:"modality"
-  ;;
-
-  let alloc_binding_pattern () =
-    Ast_pattern.( ||| )
-      (* e.g. [[@@alloc a = (heap, stack)]] *)
-      (Ast_pattern_helpers.binding_poly
-         ~pattern_pat:(Ast_pattern_helpers.ident_pattern Type.alloc)
-         ~expression_pat:(Ast_pattern_helpers.ident_expr Type.alloc)
-         ~mangle:(fun alloc -> alloc)
-         ~mangle_type:Type.alloc)
-      (* e.g. [[@@alloc a @ m = (heap_global, stack @ local)]] *)
-      (Ast_pattern_helpers.binding_poly
-         ~pattern_pat:Ast_pattern_helpers.alloc_pattern
-         ~expression_pat:Ast_pattern_helpers.alloc_expr
-         ~mangle:(fun (Tuple2 (alloc, _)) -> alloc)
-         ~mangle_type:Type.alloc)
-  ;;
-
-  let alloc_attr =
-    declare ~name:"alloc" ~contexts ~pattern:(alloc_binding_pattern ()) ~k:Fn.id
-  ;;
+  let kind_attr = declare "kind"
+  let mode_attr = declare "mode"
+  let modality_attr = declare "modality"
+  let alloc_attr = declare "alloc"
 
   let find_all_dups (type a) list ~compare =
     let module Set =
@@ -340,103 +320,216 @@ module Poly = struct
     Set.to_list dups
   ;;
 
-  let validate (Poly (_, bindings)) =
+  let validate_bindings bindings =
     let duplicate_expression_errors =
-      List.filter_map bindings ~f:(fun { pattern; expressions; _ } ->
+      List.map bindings ~f:(fun (pattern, expressions) ->
         match
           find_all_dups expressions ~compare:(fun e1 e2 ->
-            Expression.compare e1.txt e2.txt)
+            Untyped.Expression.compare e1.txt e2.txt)
         with
-        | [] -> None
+        | [] -> Ok ()
         | dups ->
-          Some
+          Error
             (Sexp.message
                "duplicate expressions for single pattern"
                [ ( ""
                  , List
-                     [ Pattern.sexp_of_t pattern
-                     ; sexp_of_list Expression.sexp_of_t (List.map ~f:Loc.txt dups)
+                     [ Untyped.Pattern.sexp_of_t pattern
+                     ; sexp_of_list
+                         Untyped.Expression.sexp_of_t
+                         (List.map ~f:Loc.txt dups)
                      ] )
                ]))
     in
-    let duplicate_pattern_errors =
+    let duplicate_pattern_error =
       match
-        find_all_dups
-          bindings
-          ~compare:(fun { pattern = pat1; _ } { pattern = pat2; _ } ->
-            Pattern.compare pat1 pat2)
+        find_all_dups bindings ~compare:(fun (pat1, _) (pat2, _) ->
+          Untyped.Pattern.compare pat1 pat2)
       with
-      | [] -> []
+      | [] -> Ok ()
       | dups ->
-        let pats = List.map dups ~f:(fun { pattern; _ } -> Pattern.sexp_of_t pattern) in
-        [ Sexp.message "duplicate patterns" [ "", List pats ] ]
+        let pats =
+          List.map dups ~f:(fun (pattern, _) -> Untyped.Pattern.sexp_of_t pattern)
+        in
+        Error (Sexp.message "duplicate patterns" [ "", List pats ])
     in
-    match duplicate_expression_errors @ duplicate_pattern_errors with
-    | [] -> Ok ()
-    | [ error ] -> Error error
-    | errors -> Error (List errors)
+    let+ (_ : unit list) =
+      duplicate_pattern_error :: duplicate_expression_errors |> Result.collect_errors
+    in
+    ()
+  ;;
+
+  let type_check_one (pattern, expressions) ~expected ~mangle_axis ~mangle =
+    let* pattern = Typed.Pattern.type_check pattern ~expected in
+    let+ expressions =
+      List.map expressions ~f:(fun { txt = expr; loc } ->
+        let+ expr = Typed.Expression.type_check expr ~expected in
+        { txt = expr; loc })
+      |> Result.all
+    in
+    Poly.Binding { pattern; expressions; mangle_axis; mangle }
+  ;;
+
+  let type_check_many bindings ~expected ~mangle_axis ~mangle =
+    let+ bindings =
+      List.map bindings ~f:(fun binding ->
+        type_check_one binding ~expected ~mangle_axis ~mangle)
+      |> Result.all
+    in
+    Poly (mangle_axis, bindings)
+  ;;
+
+  let type_check_many_maybe_tuple
+    (type expected)
+    bindings
+    ~(expected : expected Type.basic Type.t)
+    ~mangle_axis
+    ~mangle
+    =
+    let+ bindings =
+      List.map bindings ~f:(fun ((pattern, _) as binding) ->
+        (* Determine whether the binding is a tuple binding via the shape of [pattern] *)
+        match (pattern : Untyped.Pattern.t) with
+        | Tuple patterns ->
+          (* Calculate the tuple type based on the shape of [patterns] *)
+          let open struct
+            type 'a nonempty_tuple = P : ('a * _) Type.tuple -> 'a nonempty_tuple
+          end in
+          let rec loop : _ list -> expected Type.basic nonempty_tuple = function
+            | [] -> assert false
+            | [ _ ] -> P [ expected ]
+            | _ :: tl ->
+              let (P tl) = loop tl in
+              P (expected :: tl)
+          in
+          let (P tuple) = loop patterns in
+          let expected = Type.Tuple tuple in
+          let mangle (Typed.Value.Tuple (hd :: _)) = hd in
+          type_check_one binding ~expected ~mangle_axis ~mangle
+        | _ ->
+          (* If the pattern is just an identifier, assume it's not a tuple binding *)
+          type_check_one binding ~expected ~mangle_axis ~mangle)
+      |> Result.all
+    in
+    Poly (mangle_axis, bindings)
   ;;
 end
 
 let consume_poly ctx item =
   let consume attr item =
     match consume_attr attr ctx item with
-    | None -> item, []
-    | Some (item, bindings) -> item, [ bindings ]
+    | None -> item, None
+    | Some (item, bindings) -> item, Some bindings
+  in
+  let type_check_opt type_check bindings ~expected ~mangle_axis ~mangle =
+    Option.map bindings ~f:(fun binding ->
+      type_check binding ~expected ~mangle_axis ~mangle)
   in
   let item, kinds = consume Poly.kind_attr item in
   let item, modes = consume Poly.mode_attr item in
   let item, modalities = consume Poly.modality_attr item in
   let item, allocs = consume Poly.alloc_attr item in
-  let polys = kinds @ modes @ modalities @ allocs in
-  let polys_res =
-    polys
-    |> List.map ~f:Poly.validate
-    |> List.filter_map ~f:(function
-      | Ok () -> None
-      | Error err -> Some err)
-    |> function
-    | [] -> Ok polys
-    | [ err ] -> Error err
-    | errs -> Error (List errs)
+  let res =
+    let untyped = [ kinds; modes; modalities; allocs ] |> List.filter_opt in
+    let* typed =
+      let kinds =
+        type_check_opt
+          Poly.type_check_many_maybe_tuple
+          kinds
+          ~expected:Type.kind
+          ~mangle_axis:Kind
+          ~mangle:Fn.id
+      in
+      let modes =
+        type_check_opt
+          Poly.type_check_many_maybe_tuple
+          modes
+          ~expected:Type.mode
+          ~mangle_axis:Mode
+          ~mangle:Fn.id
+      in
+      let modalities =
+        type_check_opt
+          Poly.type_check_many_maybe_tuple
+          modalities
+          ~expected:Type.modality
+          ~mangle_axis:Modality
+          ~mangle:Fn.id
+      in
+      let allocs =
+        match
+          type_check_opt
+            Poly.type_check_many
+            allocs
+            ~expected:Type.alloc
+            ~mangle_axis:Alloc
+            ~mangle:Fn.id
+        with
+        | (Some (Ok _) | None) as res -> res
+        | Some (Error _) ->
+          type_check_opt
+            Poly.type_check_many
+            allocs
+            ~expected:Type.(tuple2 alloc mode)
+            ~mangle_axis:Alloc
+            ~mangle:(fun (Tuple [ alloc; _mode ]) -> alloc)
+      in
+      [ kinds; modes; modalities; allocs ]
+      |> List.filter_opt
+      |> List.map ~f:Type_error.lift_to_error_result
+      |> Result.collect_errors
+    in
+    let+ (_ : unit list) =
+      untyped |> List.map ~f:Poly.validate_bindings |> Result.collect_errors
+    in
+    typed
   in
-  item, polys_res
+  item, res
 ;;
 
 let poly = { f = consume_poly }
 
 module Mono = struct
-  type t = Expression.Basic.packed Loc.t list Type.Map.t
+  include Mono
 
   let contexts : _ Context.packed list =
     [ T Expression; T Module_expr; T Core_type; T Module_type ]
   ;;
 
-  let declare expr_pat ~name =
-    declare ~name ~contexts ~pattern:(Ast_pattern_helpers.binding_mono expr_pat) ~k:Fn.id
+  let declare name expected =
+    declare
+      ~name
+      ~contexts
+      ~pattern:(Ast_pattern_helpers.multiple_idents ())
+      ~k:(fun exprs ->
+        List.map exprs ~f:(fun { txt = expr; loc } ->
+          Result.map (Typed.Expression.type_check expr ~expected) ~f:(fun expr ->
+            Loc.make ~loc (Typed.Expression.Basic.P expr)))
+        |> List.map ~f:Type_error.lift_to_error_result
+        |> Result.collect_errors)
   ;;
 
-  let kind_attr = declare Ast_pattern_helpers.kind_expr ~name:"kind"
-  let mode_attr = declare (Ast_pattern_helpers.ident_expr Type.mode) ~name:"mode"
-
-  let modality_attr =
-    declare (Ast_pattern_helpers.ident_expr Type.modality) ~name:"modality"
-  ;;
-
-  let alloc_attr = declare (Ast_pattern_helpers.ident_expr Type.alloc) ~name:"alloc"
+  let kind_attr = declare "kind" Type.kind
+  let mode_attr = declare "mode" Type.mode
+  let modality_attr = declare "modality" Type.modality
+  let alloc_attr = declare "alloc" Type.alloc
 end
 
 let consume_mono ctx item =
-  let consume mono type_ attr item =
+  let consume mono axis attr item =
     match consume_attr attr ctx item with
     | None -> item, mono
-    | Some (item, vals) -> item, Type.Map.add (P type_) vals mono
+    | Some (item, vals) ->
+      ( item
+      , let* mono = mono in
+        let+ vals = vals in
+        Typed.Axis.Map.add (P axis) vals mono )
   in
-  let mono = Type.Map.empty in
-  let item, mono = consume mono Type.kind Mono.kind_attr item in
-  let item, mono = consume mono Type.mode Mono.mode_attr item in
-  let item, mono = consume mono Type.modality Mono.modality_attr item in
-  let item, mono = consume mono Type.alloc Mono.alloc_attr item in
+  let mono = Ok Typed.Axis.Map.empty in
+  let item, mono = consume mono Kind Mono.kind_attr item in
+  let item, mono = consume mono Mode Mono.mode_attr item in
+  let item, mono = consume mono Modality Mono.modality_attr item in
+  let item, mono = consume mono Alloc Mono.alloc_attr item in
   item, mono
 ;;
 
@@ -446,49 +539,53 @@ let consume_attr_if attr =
   { f =
       (fun ctx item ->
         match consume_attr attr ctx item with
-        | None -> item, None
-        | Some (item, expr) -> item, Some expr)
+        | None -> item, Ok None
+        | Some (item, Ok value) -> item, Ok (Some value)
+        | Some (item, (Error _ as err)) -> item, err)
   }
 ;;
 
 module Exclave_if = struct
-  let declare ~name ~type_ =
+  let declare name expected =
     declare
       ~name
       ~contexts:[ T Expression ]
-      ~pattern:
-        (Ast_pattern.single_expr_payload ((Ast_pattern_helpers.ident_expr type_).pat ()))
-      ~k:Fn.id
+      ~pattern:(Ast_pattern_helpers.single_ident ())
+      ~k:(fun { txt = expr; loc } ->
+        (let+ expr = Typed.Expression.type_check expr ~expected in
+         { txt = expr; loc })
+        |> Type_error.lift_to_error_result)
   ;;
 
-  let local_attr = declare ~name:"exclave_if_local" ~type_:Type.mode
-  let stack_attr = declare ~name:"exclave_if_stack" ~type_:Type.alloc
+  let local_attr = declare "exclave_if_local" Type.mode
+  let stack_attr = declare "exclave_if_stack" Type.alloc
 end
 
 let exclave_if_local = consume_attr_if Exclave_if.local_attr
 let exclave_if_stack = consume_attr_if Exclave_if.stack_attr
 
 module Zero_alloc_if = struct
-  let pattern type_ =
+  let pattern () =
     let open Ast_pattern in
     single_expr_payload
-      (map ((Ast_pattern_helpers.ident_expr type_).pat ()) ~f:(fun k mode -> k mode [])
-       ||| pexp_apply
-             ((Ast_pattern_helpers.ident_expr type_).pat ())
-             (many (pair nolabel __)))
+      (map (Ast_pattern_helpers.ident_expr ()) ~f:(fun k mode -> k mode [])
+       ||| pexp_apply (Ast_pattern_helpers.ident_expr ()) (many (pair nolabel __)))
     |> map2' ~f:(fun loc mode payload -> loc, mode, payload)
   ;;
 
-  let declare ~name ~type_ =
+  let declare name expected =
     declare
       ~name
       ~contexts:[ T Expression; T Value_binding; T Value_description ]
-      ~pattern:(pattern type_)
-      ~k:Fn.id
+      ~pattern:(pattern ())
+      ~k:(fun (loc, { txt = expr; loc = mode_loc }, args) ->
+        (let+ expr = Typed.Expression.type_check expr ~expected in
+         loc, { txt = expr; loc = mode_loc }, args)
+        |> Type_error.lift_to_error_result)
   ;;
 
-  let local_attr = declare ~name:"zero_alloc_if_local" ~type_:Type.mode
-  let stack_attr = declare ~name:"zero_alloc_if_stack" ~type_:Type.alloc
+  let local_attr = declare "zero_alloc_if_local" Type.mode
+  let stack_attr = declare "zero_alloc_if_stack" Type.alloc
 end
 
 let zero_alloc_if_local = consume_attr_if Zero_alloc_if.local_attr
@@ -533,41 +630,94 @@ module Floating = struct
       { bindings : Attached_poly.t
       ; default : bool
       }
-
-    let validate t = Attached_poly.validate t.bindings
   end
 
   let contexts : _ Context.packed list = [ T Structure_item; T Signature_item ]
 
-  let declare_poly ~name ~pattern =
+  let declare name type_check =
     List.map [ false; true ] ~f:(fun default ->
       let name = if default then name ^ ".default" else name in
-      declare ~name ~contexts ~pattern ~k:(fun bindings -> { Poly.bindings; default }))
+      declare
+        ~name
+        ~contexts
+        ~pattern:(Ast_pattern_helpers.bindings ())
+        ~k:(fun bindings ->
+          let* () = Attached_poly.validate_bindings bindings in
+          let+ bindings = type_check bindings |> Type_error.lift_to_error_result in
+          ({ bindings; default } : Poly.t)))
   ;;
 
-  let declare_basic type_ expr_pat ~name =
-    declare_poly ~name ~pattern:(Attached_poly.basic_pattern type_ expr_pat)
+  let kind_poly =
+    declare "kind" (fun bindings ->
+      Attached_poly.type_check_many_maybe_tuple
+        bindings
+        ~expected:Type.kind
+        ~mangle_axis:Kind
+        ~mangle:Fn.id)
   ;;
-
-  let kind_poly = declare_basic Type.kind Ast_pattern_helpers.kind_expr ~name:"kind"
 
   let mode_poly =
-    declare_basic Type.mode (Ast_pattern_helpers.ident_expr Type.mode) ~name:"mode"
+    declare "mode" (fun bindings ->
+      Attached_poly.type_check_many_maybe_tuple
+        bindings
+        ~expected:Type.mode
+        ~mangle_axis:Mode
+        ~mangle:Fn.id)
   ;;
 
   let modality_poly =
-    declare_basic
-      Type.modality
-      (Ast_pattern_helpers.ident_expr Type.modality)
-      ~name:"modality"
+    declare "modality" (fun bindings ->
+      Attached_poly.type_check_many_maybe_tuple
+        bindings
+        ~expected:Type.modality
+        ~mangle_axis:Modality
+        ~mangle:Fn.id)
   ;;
 
   let alloc_poly =
-    declare_poly ~name:"alloc" ~pattern:(Attached_poly.alloc_binding_pattern ())
+    declare "alloc" (fun bindings ->
+      match
+        Attached_poly.type_check_many
+          bindings
+          ~expected:Type.alloc
+          ~mangle_axis:Alloc
+          ~mangle:Fn.id
+      with
+      | Ok _ as ok -> ok
+      | Error _ ->
+        Attached_poly.type_check_many
+          bindings
+          ~expected:Type.(tuple2 alloc mode)
+          ~mangle_axis:Alloc
+          ~mangle:(fun (Tuple [ alloc; _mode ]) -> alloc))
+  ;;
+
+  let all_attrs = kind_poly @ mode_poly @ modality_poly @ alloc_poly
+
+  let is_present (type a) (ctx : a Context.poly) (ast : a) =
+    let maybe_attr =
+      match ctx, ast with
+      | Signature_item, { psig_desc = Psig_attribute attr; _ } -> Some attr
+      | Signature_item, _ -> None
+      | Structure_item, { pstr_desc = Pstr_attribute attr; _ } -> Some attr
+      | Structure_item, _ -> None
+    in
+    match maybe_attr with
+    | None -> false
+    | Some attr ->
+      let ast_attr_name =
+        let name = attr.attr_name.txt in
+        if String.is_prefix name ~prefix:"template." then name else "template." ^ name
+      in
+      List.map all_attrs ~f:(fun attr ->
+        Attribute.Floating.name (Attribute_map.find_exn attr ctx))
+      |> List.exists ~f:(fun attr_name -> String.equal attr_name ast_attr_name)
   ;;
 
   let convert_poly ctx ast =
-    convert_attrs (kind_poly @ mode_poly @ modality_poly @ alloc_poly) ctx ast
-    |> Option.map ~f:(fun poly -> poly |> Poly.validate |> Result.map ~f:(fun () -> poly))
+    match convert_attrs all_attrs ctx ast with
+    | None -> Ok None
+    | Some (Ok value) -> Ok (Some value)
+    | Some (Error _ as err) -> err
   ;;
 end

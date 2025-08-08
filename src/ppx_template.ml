@@ -1,4 +1,6 @@
 open! Stdppx
+open Ppx_template_expander
+open Ppx_template_expander.Private
 open! Import
 
 let structure =
@@ -7,7 +9,7 @@ let structure =
     Structure_item
     Ast_pattern.(pstr __)
     (fun ~loc:(_ : location) ~path:(_ : string) stris ->
-      Monomorphize.t#structure Monomorphize.Context.top stris)
+      Monomorphize.t_inline#structure Monomorphize.Context.top stris)
 ;;
 
 let signature =
@@ -17,7 +19,7 @@ let signature =
     Ast_pattern.(psig __)
     (fun ~loc:(_ : location) ~path:(_ : string) sigis ->
       (Ppxlib_jane.Shim.Signature.of_parsetree
-         (Monomorphize.t#signature Monomorphize.Context.top sigis))
+         (Monomorphize.t_inline#signature Monomorphize.Context.top sigis))
         .psg_items)
 ;;
 
@@ -27,7 +29,7 @@ let expression =
     Expression
     Ast_pattern.(pstr (pstr_eval __ drop ^:: nil))
     (fun ~loc:(_ : location) ~path:(_ : string) expr ->
-      Monomorphize.t#expression Monomorphize.Context.top expr)
+      Monomorphize.t_inline#expression Monomorphize.Context.top expr)
 ;;
 
 let module_expr =
@@ -38,7 +40,7 @@ let module_expr =
     (fun ~loc ~path:(_ : string) stris ->
       Ast_builder.pmod_structure
         ~loc:{ loc with loc_ghost = true }
-        (Monomorphize.t#structure Monomorphize.Context.top stris))
+        (Monomorphize.t_inline#structure Monomorphize.Context.top stris))
 ;;
 
 let module_type =
@@ -49,7 +51,7 @@ let module_type =
     (fun ~loc ~path:(_ : string) sigis ->
       Ppxlib_jane.Ast_builder.Default.pmty_signature
         ~loc:{ loc with loc_ghost = true }
-        (Monomorphize.t#signature Monomorphize.Context.top sigis))
+        (Monomorphize.t_inline#signature Monomorphize.Context.top sigis))
 ;;
 
 let core_type =
@@ -58,7 +60,7 @@ let core_type =
     Core_type
     Ast_pattern.(ptyp __)
     (fun ~loc:(_ : location) ~path:(_ : string) typ ->
-      Monomorphize.t#core_type Monomorphize.Context.top typ)
+      Monomorphize.t_inline#core_type Monomorphize.Context.top typ)
 ;;
 
 let require_template_extension = ref false
@@ -83,10 +85,37 @@ let check_if_bare_attributes_allowed ~loc =
 
 let mono_attrs = []
 
+(* Piggyback on ppxlib's ability to inline structure items. *)
+let inline_structure =
+  Extension.declare_inline
+    "@template.inline"
+    Structure_item
+    Ast_pattern.(pstr __)
+    (fun ~loc:(_ : location) ~path:(_ : string) stris -> stris)
+;;
+
+let inline_signature =
+  Extension.declare_inline
+    "@template.inline"
+    Signature_item
+    Ast_pattern.(psig __)
+    (fun ~loc:(_ : location) ~path:(_ : string) sigis ->
+      (Ppxlib_jane.Shim.Signature.of_parsetree sigis).psg_items)
+;;
+
 let () =
   Driver.register_transformation
     "template"
-    ~extensions:[ structure; signature; expression; module_expr; module_type; core_type ]
+    ~extensions:
+      [ structure
+      ; signature
+      ; expression
+      ; module_expr
+      ; module_type
+      ; core_type
+      ; inline_structure
+      ; inline_signature
+      ]
     ~rules:mono_attrs
 ;;
 
@@ -116,7 +145,3 @@ let () =
     "@template.portable"
     ~extensions:[ module_binding; module_declaration ]
 ;;
-
-module Export = struct
-  module Monomorphize = Monomorphize
-end

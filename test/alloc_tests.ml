@@ -1,4 +1,4 @@
-open! Core
+open! Ppx_template_test_common
 
 [@@@disable_unused_warnings]
 
@@ -60,61 +60,106 @@ module List : sig
     include sig
       val cons : 'a -> 'a t -> 'a t
     end
+    [@@ocaml.doc " @inline "]
   end
+  [@@ocaml.doc " @inline "]
 
   include sig
     include sig
+      [@@@ocaml.text "/*"]
+
       val cons__stack : 'a -> 'a t -> 'a t [@@zero_alloc]
+
+      [@@@ocaml.text "/*"]
     end
+    [@@ocaml.doc " @inline "]
 
     include sig
+      [@@@ocaml.text "/*"]
+
       val cons__local__stack : 'a -> 'a t -> 'a t [@@zero_alloc]
+
+      [@@@ocaml.text "/*"]
     end
+    [@@ocaml.doc " @inline "]
   end
+  [@@ocaml.doc " @inline "]
 
   include sig
     include sig
+      [@@@ocaml.text "/*"]
+
       val map__local : 'a t -> f:('a -> 'a) -> 'a t
+
+      [@@@ocaml.text "/*"]
+
+      [@@@ocaml.text "/*"]
+
       val fold__local : 'a t -> init:'acc -> f:('acc -> 'a -> 'acc) -> 'acc
+
+      [@@@ocaml.text "/*"]
     end
+    [@@ocaml.doc " @inline "]
 
     include sig
       val map : 'a t -> f:('a -> 'a) -> 'a t
       val fold : 'a t -> init:'acc -> f:('acc -> 'a -> 'acc) -> 'acc
     end
+    [@@ocaml.doc " @inline "]
   end
+  [@@ocaml.doc " @inline "]
 
   include sig
     include sig
+      [@@@ocaml.text "/*"]
+
       val map__local__stack : 'a t -> f:('a -> 'a) -> 'a t [@@zero_alloc]
+
+      [@@@ocaml.text "/*"]
+
+      [@@@ocaml.text "/*"]
 
       val fold__local__stack : 'a t -> init:'acc -> f:('acc -> 'a -> 'acc) -> 'acc
       [@@zero_alloc]
+
+      [@@@ocaml.text "/*"]
     end
+    [@@ocaml.doc " @inline "]
 
     include sig
+      [@@@ocaml.text "/*"]
+
       val map__stack : 'a t -> f:('a -> 'a) -> 'a t [@@zero_alloc]
+
+      [@@@ocaml.text "/*"]
+
+      [@@@ocaml.text "/*"]
+
       val fold__stack : 'a t -> init:'acc -> f:('acc -> 'a -> 'acc) -> 'acc [@@zero_alloc]
+
+      [@@@ocaml.text "/*"]
     end
+    [@@ocaml.doc " @inline "]
   end
+  [@@ocaml.doc " @inline "]
 end = struct
   type 'a t = 'a list
 
   include struct
     include struct
       let cons hd tl = hd :: tl
-    end
-  end
+    end [@@ocaml.doc " @inline "]
+  end [@@ocaml.doc " @inline "]
 
   include struct
     include struct
       let cons__stack hd tl = hd :: tl
-    end
+    end [@@ocaml.doc " @inline "]
 
     include struct
       let cons__local__stack hd tl = hd :: tl
-    end
-  end
+    end [@@ocaml.doc " @inline "]
+  end [@@ocaml.doc " @inline "]
 
   include struct
     include struct
@@ -129,7 +174,7 @@ end = struct
         | [] -> init
         | hd :: tl -> fold__local tl ~init:(f init hd) ~f
       ;;
-    end
+    end [@@ocaml.doc " @inline "]
 
     include struct
       let rec map t ~f =
@@ -143,8 +188,8 @@ end = struct
         | [] -> init
         | hd :: tl -> fold tl ~init:(f init hd) ~f
       ;;
-    end
-  end
+    end [@@ocaml.doc " @inline "]
+  end [@@ocaml.doc " @inline "]
 
   include struct
     include struct
@@ -159,7 +204,7 @@ end = struct
         | [] -> init
         | hd :: tl -> fold__local__stack tl ~init:((f [@zero_alloc assume]) init hd) ~f
       ;;
-    end
+    end [@@ocaml.doc " @inline "]
 
     include struct
       let rec map__stack t ~f =
@@ -173,8 +218,8 @@ end = struct
         | [] -> init
         | hd :: tl -> fold__stack tl ~init:((f [@zero_alloc assume]) init hd) ~f
       ;;
-    end
-  end
+    end [@@ocaml.doc " @inline "]
+  end [@@ocaml.doc " @inline "]
 end
 
 [@@@end]
@@ -189,11 +234,11 @@ end
 
 include struct
   let f x = x
-end
+end [@@ocaml.doc " @inline "]
 
 include struct
   let f x = x
-end
+end [@@ocaml.doc " @inline "]
 
 [@@@end]
 
@@ -244,7 +289,7 @@ include struct
       module Inner2 = struct
         let f x = x
       end
-    end
+    end [@@ocaml.doc " @inline "]
   end
 
   module Outer2 = struct
@@ -254,7 +299,7 @@ include struct
   module Outer3__stack = struct
     let f x = x
   end
-end
+end [@@ocaml.doc " @inline "]
 
 include struct
   module Outer1__stack = struct
@@ -269,7 +314,7 @@ include struct
       module Inner2 = struct
         let f x = x
       end
-    end
+    end [@@ocaml.doc " @inline "]
 
     include struct
       module Inner1__stack = struct
@@ -279,7 +324,7 @@ include struct
       module Inner2__stack = struct
         let f x = x
       end
-    end
+    end [@@ocaml.doc " @inline "]
   end
 
   module Outer2 = struct
@@ -289,6 +334,6 @@ include struct
   module Outer3__stack = struct
     let f x = x
   end
-end
+end [@@ocaml.doc " @inline "]
 
 [@@@end]

@@ -1,11 +1,17 @@
 open! Stdppx
 open! Import
-open Language
+open Language.Typed
 
 module Suffix : sig
   type t
 
-  val create : Value.Basic.packed list Type.Map.t -> t
+  val create : Value.Basic.packed list Axis.Map.t -> t
+end
+
+module Result : sig
+  type t
+
+  val did_mangle : t -> bool
 end
 
 (** We piggyback on [Ast_traverse] because it gives us a lot of AST traversal code for
@@ -22,13 +28,13 @@ end
     global singleton [Mangle] object for every identifier we need to mangle, calling pure
     functions, rather than creating a fresh object with many methods and potentially some
     closures each time. *)
-val t : Suffix.t Ast_traverse.map_with_context
+val t : (Suffix.t, Result.t) Ast_traverse.lift_map_with_context
 
 (** Apply name mangling to the item, using the given attribute expressions and
     environment. *)
 val mangle
   :  'a Attributes.Context.mono
   -> 'a
-  -> Expression.Basic.packed Loc.t list Type.Map.t
+  -> Expression.Basic.packed Loc.t list Axis.Map.t
   -> env:Env.t
   -> 'a

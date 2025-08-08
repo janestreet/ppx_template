@@ -1,4 +1,4 @@
-open! Core
+open! Ppx_template_test_common
 
 [@@@disable_unused_warnings]
 
@@ -17,20 +17,18 @@ module type Y = sig
   val f : unit -> unit
 end
 
-include struct
-  module M__portable (Y : sig
-      include Y
-    end) =
-  struct
-    let g = Y.f
-  end
+module M__portable (Y : sig
+    include Y
+  end) =
+struct
+  let g = Y.f
+end
 
-  module M (Y : sig
-      include Y
-    end) =
-  struct
-    let g = Y.f
-  end
+module M (Y : sig
+    include Y
+  end) =
+struct
+  let g = Y.f
 end
 
 [@@@end]
@@ -50,23 +48,23 @@ include struct
 
   include struct
     type t__'value_mod_nonportable'
-  end
+  end [@@ocaml.doc " @inline "]
 
   include struct
     type t__'bits64_mod_nonportable'
-  end
-end
+  end [@@ocaml.doc " @inline "]
+end [@@ocaml.doc " @inline "]
 
 include struct
   type u__portable = { field : unit -> unit }
 
   include struct
     type t__'value_mod_portable'
-  end
+  end [@@ocaml.doc " @inline "]
 
   include struct
     type t__'bits64_mod_portable'
-  end
-end
+  end [@@ocaml.doc " @inline "]
+end [@@ocaml.doc " @inline "]
 
 [@@@end]
