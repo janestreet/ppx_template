@@ -4,7 +4,7 @@ open Language.Typed
 
 module Context = struct
   module Defaults = struct
-    type t = Value.Basic.packed list Axis.Map.t
+    type t = Value.Basic.packed list Maybe_explicit.t Axis.Map.t
 
     let empty = Axis.Map.empty
   end
@@ -67,7 +67,7 @@ let stable_dedup list ~compare =
 let handle_one_binding
   ~original_env
   envs
-  (Attributes.Poly.Binding { pattern; expressions; mangle; mangle_axis })
+  (explicitness, Attributes.Poly.Binding { pattern; expressions; mangle; mangle_axis })
   =
   List.concat_map envs ~f:(fun (env, manglers) ->
     List.map expressions ~f:(fun expr -> Env.eval original_env expr)
@@ -75,23 +75,40 @@ let handle_one_binding
     |> stable_dedup ~compare:Value.compare
     |> List.map ~f:(fun value ->
       let env = Env.bind env pattern value in
-      let mangle_value = mangle value in
+      let mangle_value = Value.Basic.P (mangle value) in
       let manglers =
-        Axis.Map.add_to_list (P mangle_axis) (Value.Basic.P mangle_value) manglers
+        Axis.Map.update
+          (P mangle_axis)
+          (function
+            | None -> Some (explicitness, [ mangle_value ])
+            | Some (_old_explicitness, values) ->
+              (* Drop previous explicit flag and use new explicit flag *)
+              Some (explicitness, mangle_value :: values))
+          manglers
       in
       env, manglers))
 ;;
 
-let handle_one_attribute ~original_env envs (Attributes.Poly.Poly (mangle_axis, bindings))
+let handle_one_attribute
+  ~original_env
+  envs
+  (explicit, Attributes.Poly.Poly (mangle_axis, bindings))
   =
   (* Explicitly set the entry in the manglers for the current [type_] to empty so that
      putting an empty [[@@kind]] attribute disables the default kind mangling from
      [[@@@kind.default]]. *)
   let init =
     List.map envs ~f:(fun (env, manglers) ->
-      env, Axis.Map.add (P mangle_axis) [] manglers)
+      ( env
+      , Axis.Map.add
+          (P mangle_axis)
+          (* The initial state should be no explicit mangling. *)
+          (Maybe_explicit.Drop_axis_if_all_defaults, [])
+          manglers ))
   in
-  List.fold_left bindings ~init ~f:(handle_one_binding ~original_env)
+  bindings
+  |> List.map ~f:(fun binding -> explicit, binding)
+  |> List.fold_left ~init ~f:(handle_one_binding ~original_env)
 ;;
 
 let instantiate poly_attributes ~env:(original_env : Env.t) =
@@ -103,7 +120,7 @@ let instantiate poly_attributes ~env:(original_env : Env.t) =
   in
   List.map envs ~f:(fun (env, manglers) ->
     (* Manglers were added in reverse order *)
-    env, Axis.Map.map List.rev manglers)
+    env, Axis.Map.map (Maybe_explicit.map ~f:List.rev) manglers)
 ;;
 
 let consume_poly
@@ -319,6 +336,21 @@ let t ~mk_struct ~mk_sig =
   let mk_sig ~loc nodes =
     let loc = { loc with loc_ghost = true } in
     (mk_sig ~loc nodes).psig_desc
+  in
+  let content_span =
+    object
+      inherit [Location.t option] Ast_traverse.fold
+
+      method! location loc acc =
+        match acc with
+        | None -> Some loc
+        | Some acc ->
+          Some
+            { loc_start = Location.min_pos acc.loc_start loc.loc_start
+            ; loc_end = Location.max_pos acc.loc_end loc.loc_end
+            ; loc_ghost = true
+            }
+    end
   in
   object (self)
     inherit [Context.t] Ppxlib_jane.Ast_traverse.map_with_context as super
@@ -539,8 +571,10 @@ let t ~mk_struct ~mk_sig =
                    , { psig_desc = Psig_attribute _; psig_loc = attr_loc; _ } ) ->
                    (match extract_floating_bindings attr_ctx item with
                     | Ok None -> visit ctx item :: loop ctx items
-                    | Ok (Some { bindings; default }) ->
-                      let instances = instantiate [ bindings ] ~env:ctx.env in
+                    | Ok (Some (explicitness, { bindings; default })) ->
+                      let instances =
+                        instantiate [ explicitness, bindings ] ~env:ctx.env
+                      in
                       List.mapi instances ~f:(fun i (env, manglers) ->
                         let defaults =
                           match default with
@@ -552,8 +586,15 @@ let t ~mk_struct ~mk_sig =
                                 | None, None -> None
                                 | Some defaults, None | None, Some defaults ->
                                   Some defaults
-                                | Some ctx_defaults, Some new_defaults ->
-                                  Some (ctx_defaults @ new_defaults))
+                                | ( Some (_old_explicitness, ctx_defaults)
+                                  , Some new_defaults ) ->
+                                  Some
+                                    (* Always use the explicit flag from the new
+                                       attribute. *)
+                                    (Maybe_explicit.map
+                                       new_defaults
+                                       ~f:(fun new_defaults ->
+                                         ctx_defaults @ new_defaults)))
                               ctx.defaults
                               manglers
                         in
@@ -580,18 +621,32 @@ let t ~mk_struct ~mk_sig =
     method! structure ctx items = self#visit_floating_poly Structure_item ctx items
     method! signature_items ctx items = self#visit_floating_poly Signature_item ctx items
 
-    method! expression_desc ctx =
-      function
-      | Pexp_let (rec_flag, bindings, expr) ->
+    method! expression_desc ctx pexp_desc =
+      let loc =
+        content_span#expression_desc pexp_desc None |> Option.value ~default:Location.none
+      in
+      match Ppxlib_jane.Shim.Expression_desc.of_parsetree pexp_desc ~loc with
+      | Pexp_let (mutable_flag, rec_flag, bindings, expr) ->
         self#visit_poly Value_binding ctx bindings ~f:(fun bindings ->
           let bindings = List.map bindings ~f:Maybe_hide_in_docs.node in
-          Pexp_let (self#rec_flag ctx rec_flag, bindings, self#expression ctx expr))
-      | desc -> super#expression_desc ctx desc
+          Pexp_let
+            ( self#mutable_flag ctx mutable_flag
+            , self#rec_flag ctx rec_flag
+            , bindings
+            , self#expression ctx expr )
+          |> Ppxlib_jane.Shim.Expression_desc.to_parsetree ~loc)
+      | _ -> super#expression_desc ctx pexp_desc
 
     method! structure_item ctx =
       function
       | [%stri [%%template.portable [%%i? { pstr_desc = Pstr_module mod_; _ }]]] as stri
-        -> Portable.module_binding ~loc:stri.pstr_loc mod_ |> self#structure_item ctx
+        ->
+        Portable_stateless.module_binding Portable ~loc:stri.pstr_loc ~mod_
+        |> self#structure_item ctx
+      | [%stri [%%template.stateless [%%i? { pstr_desc = Pstr_module mod_; _ }]]] as stri
+        ->
+        Portable_stateless.module_binding Stateless ~loc:stri.pstr_loc ~mod_
+        |> self#structure_item ctx
       | stri -> super#structure_item ctx stri
 
     method! structure_item_desc =
@@ -647,7 +702,13 @@ let t ~mk_struct ~mk_sig =
     method! signature_item ctx =
       function
       | [%sigi: [%%template.portable: [%%i? { psig_desc = Psig_module mod_; _ }]]] as sigi
-        -> Portable.module_declaration ~loc:sigi.psig_loc mod_ |> self#signature_item ctx
+        ->
+        Portable_stateless.module_declaration Portable ~loc:sigi.psig_loc ~mod_
+        |> self#signature_item ctx
+      | [%sigi: [%%template.stateless: [%%i? { psig_desc = Psig_module mod_; _ }]]] as
+        sigi ->
+        Portable_stateless.module_declaration Stateless ~loc:sigi.psig_loc ~mod_
+        |> self#signature_item ctx
       | sigi -> super#signature_item ctx sigi
 
     method! signature_item_desc =

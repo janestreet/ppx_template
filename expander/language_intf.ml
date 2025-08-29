@@ -171,6 +171,8 @@ module Definitions = struct
             | Locality
             | Portability
             | Contention
+            | Visibility
+            | Access
             | Affinity
             | Uniqueness
             | Yielding

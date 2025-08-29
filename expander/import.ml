@@ -32,3 +32,6 @@ end
 
 (* Re-export from [Import] to shadow [Result] from [open Stdppx] *)
 module Result = Result
+
+(* Convenience functions *)
+let map_snd (x, y) ~f = x, f y

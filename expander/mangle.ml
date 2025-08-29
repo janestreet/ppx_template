@@ -28,9 +28,11 @@ module Suffix = struct
 
   let create mono =
     let extract axis =
-      match Axis.Map.find_opt (P axis) mono with
+      match (Axis.Map.find_opt (P axis) mono : _ Maybe_explicit.t option) with
       | None -> []
-      | Some manglers ->
+      | Some (Explicit, manglers) ->
+        List.map manglers ~f:(fun (Value.Basic.P value) -> mangle_value value)
+      | Some (Drop_axis_if_all_defaults, manglers) ->
         (* A map from axis to manglers. This is general because non-mode manglers should
            end up with a single axis. Non-mode axes can be specified in the future if
            necessary. *)
@@ -265,9 +267,10 @@ let mangle (type a) (attr_ctx : a Attributes.Context.mono) (node : a) mangle_exp
   else (
     let manglers =
       Axis.Map.map
-        (fun exprs ->
-          List.map exprs ~f:(fun { txt = Expression.Basic.P expr; loc } ->
-            Value.Basic.P (Env.eval env { txt = expr; loc })))
+        (Maybe_explicit.map
+           ~f:
+             (List.map ~f:(fun { txt = Expression.Basic.P expr; loc } ->
+                Value.Basic.P (Env.eval env { txt = expr; loc }))))
         mangle_exprs
     in
     let suffix = Suffix.create manglers in

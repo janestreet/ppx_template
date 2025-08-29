@@ -9,7 +9,7 @@ module Definitions = struct
   end
 
   module Mono = struct
-    type t = Expression.Basic.packed Loc.t list Axis.Map.t
+    type t = Expression.Basic.packed Loc.t list Maybe_explicit.t Axis.Map.t
   end
 
   type poly_w =
@@ -79,6 +79,7 @@ module type Attributes = sig
     val poly_to_any : 'a poly -> 'a any
     val mono_to_any : 'a mono -> 'a any
     val zero_alloc_if_to_any : 'a zero_alloc_if -> 'a any
+    val location : ('a, 'b) t -> 'a -> Location.t
   end
 
   (** A [('w, 'b) t] is a handler that knows how to consume a particular attribute on ['w]
@@ -103,7 +104,10 @@ module type Attributes = sig
   module Attribute_map : sig
     type ('w, 'b) t
 
-    val find_exn : ('w, 'b) t -> ('a, 'w) Context.t -> ('a, 'b) Attribute.t
+    val find_exn
+      :  ('w, 'b) t
+      -> ('a, 'w) Context.t
+      -> ('a, 'b) Attribute.t Maybe_explicit.Both.t
   end
 
   module Poly : module type of struct
@@ -113,7 +117,7 @@ module type Attributes = sig
   (** A handler for attributes that make definitions/declarations polymorphic. Might
       return an [Error _] if the attribute's payload is malformed. Defaults to
       [Ok { kinds = None; modes = None }]. *)
-  val poly : (poly_w, (Poly.t list, Sexp.t) result) t
+  val poly : (poly_w, (Poly.t Maybe_explicit.t list, Sexp.t) result) t
 
   module Mono : sig
     include module type of struct
@@ -163,6 +167,8 @@ module type Attributes = sig
             result )
         t
 
+  val raise_you_can_only_use_one_attribute_per_axis : loc:location -> _
+
   module Floating : sig
     type poly :=
       [ `structure_item
@@ -191,6 +197,9 @@ module type Attributes = sig
     (** Check if the provided ast node is a floating template attribute, and evaluate its
         contents. Marks the attribute as seen. Returns an [Error _] if the payload of the
         attribute is malformed or inconsistent. *)
-    val convert_poly : ('a, poly) Context.t -> 'a -> (Poly.t option, Sexp.t) result
+    val convert_poly
+      :  ('a, poly) Context.t
+      -> 'a
+      -> (Poly.t Maybe_explicit.t option, Sexp.t) result
   end
 end

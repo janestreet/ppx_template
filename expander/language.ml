@@ -248,6 +248,8 @@ module Typed = struct
           | "global" | "local" -> Known Locality
           | "nonportable" | "portable" -> Known Portability
           | "uncontended" | "contended" | "shared" -> Known Contention
+          | "stateful" | "observing" | "stateless" -> Known Visibility
+          | "read_write" | "read" | "immutable" -> Known Access
           | "many" | "once" -> Known Affinity
           | "aliased" | "unique" -> Known Uniqueness
           | "unyielding" | "yielding" -> Known Yielding
@@ -263,6 +265,8 @@ module Typed = struct
           | Locality -> "global"
           | Portability -> "nonportable"
           | Contention -> "uncontended"
+          | Visibility -> "stateful"
+          | Access -> "read_write"
           | Affinity -> "many"
           | Uniqueness -> "aliased"
           | Yielding -> "unyielding"
@@ -283,6 +287,8 @@ module Typed = struct
           | Locality -> "local"
           | Portability -> "nonportable"
           | Contention -> "uncontended"
+          | Visibility -> "stateful"
+          | Access -> "read_write"
           | Affinity -> "once"
           | Uniqueness -> "unique"
           | Yielding -> "yielding"
@@ -623,6 +629,10 @@ module Typed = struct
             +-------------+-------------+-------------+-------------+
             | contention  |   monadic   | uncontended | uncontended |
             +-------------+-------------+-------------+-------------+
+            | visibility  | comonadic   | stateful    | stateful    |
+            +-------------+-------------+-------------+-------------+
+            | access      |   monadic   | read_write  | read_write  |
+            +-------------+-------------+-------------+-------------+
             | affinity    | comonadic   | once        | many        |
             +-------------+-------------+-------------+-------------+
             | uniqueness  |   monadic   | unique      | aliased     |
@@ -649,8 +659,17 @@ module Typed = struct
           | ( { type_ = Basic (Mode | Modality); ident = pat_ident }
             , Identifier
                 { ident =
-                    ("portable" | "nonportable" | "contended" | "shared" | "uncontended")
-                    as expr_ident
+                    ( "portable"
+                    | "nonportable"
+                    | "contended"
+                    | "shared"
+                    | "uncontended"
+                    | "stateless"
+                    | "observing"
+                    | "stateful"
+                    | "immutable"
+                    | "read"
+                    | "read_write" ) as expr_ident
                 ; type_ = _
                 } ) ->
             [ Entry

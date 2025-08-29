@@ -11,23 +11,113 @@ set up mdx
 # Overview
 
 `ppx_template` emulates polymorphism by generating multiple copies of a given binding for
-different parameters. For example, to write an identity function which works for all kinds
-of unboxed numbers, one might write:
+different parameters. The ppx is particularly used to support polymorphism over kinds,
+modes/modalities, and allocation behavior, all of which the OxCaml team has plans to
+support first class in the compiler at some point in the future, but are not currently
+available.
 
+## Basic client usage
+
+To invoke `ppx_template` as a client of a library, you just need to add the corresponding
+attribute to request a particular version of a function. For example, suppose you want
+to filter over a list of `bits64` values; then, you would invoke `(List.filter [@kind bits64])`.
+Similarly, if you wanted to extract the contents of a local option, you would invoke
+`(Option.value [@mode local])`. In cases where a function is templated over multiple
+parameters, you might need to provide more arguments to the attributes, or even use
+multiple attributes (e.g. `(List.fold [@kind bits32 bits64] [@mode local global])` will give
+you a fold function that consumes a `local` list of `bits32`s, and produces a
+`global` value of kind `bits64`).
+
+A few other examples of ways you might invoke a templated value:
 ```ocaml
-let%template id (type a : k) (x : a) = x
-[@@kind k = (float32, float64, bits32, bits64)]
+(* Convert a locally allocated [string array] to a stack allocated sexp *)
+let stack_sexp_of_string_array arr = exclave_
+  (Array.sexp_of_t [@alloc stack]) (String.sexp_of_t [@alloc stack]) arr
+;;
+
+(* Make a comparator over some type that allows sets of strings to be portable *)
+module My_type = struct
+  module T = struct
+    type t = Box of string
+    [@@deriving compare, sexp]
+  end
+
+  (* The template annotation here invokes a version of [Comparable.Make] that requires
+     [t] to have certain properties, and that the required functions are all portable. *)
+  include Comparable.Make [@mode portable] (T)
+end
+
+(* Write a type that contains a list of [bits32]s *)
+type ('a : bits32) my_list = { elts : ('a List.t [@kind bits32]) }
 ```
 
-This generates four functions: `id__float32`, `id__float64`, `id__bits32`, and
-`id__bits64`, which can be called by using the `[@kind]` attribute on an identifier:
-
+To see what template instances are available for a given value, you can check its
+declaration:
 ```ocaml
-let test x =
-  [%test_result: float]
-    (Float_u.to_float ((id [@kind float64]) (Float_u.of_float x)))
-    ~expect:x
-;;
+(* The [%template] just enables the ppx to traverse over its payload, but doesn't
+   actually have its own meaningful effect. *)
+module type%template T = sig
+  (* An identity function over various kinds *)
+  val id : ('a : k). 'a -> 'a
+  [@@kind k = (float32, float64, bits32, bits64)]
+
+  (* Some ppxes know about templates and provide their own ways of invoking
+     templates *)
+  type t [@@deriving sexp ~stackify]
+
+  (* equivalently: *)
+  val t_of_sexp : Sexp.t -> t
+  val sexp_of_t : t @ m -> Sexp.t @ m
+  [@@alloc __ @ m = (heap @ global, stack @ local)]
+
+  (* When multiple items are being templated over the same parameters, you can
+     avoid repetition by using a toplevel attribute, which applies to all items
+     below it (for more details on [.default], read "## Attributes" below) *)
+  [@@@mode.default p = (nonportable, portable)]
+
+  val construct_tuple : 'a @ p -> 'b @ p -> ('a * 'b) @ p
+  val tuple_fst : ('a * 'b) @ p -> 'a @ p
+  val tuple_snd : ('a * 'b) @ p -> 'b @ p
+end
+```
+
+## Basic library usage
+
+The invocations to define your own templated values are a bit more complicated, and
+you're encouraged to read the rest of this document to get an intuition for how the
+template language works. If you're just looking for a basic guide on how to read
+existing templates, though, then here's a few examples:
+```ocaml
+module%template T : T = struct
+  (* An identity function over various kinds *)
+  let id (type a : k) (x : a) = x
+  [@@kind k = (float32, float64, bits32, bits64)]
+
+  type t = string * bool
+
+  let sexp_of_t ((string, bool) @ m) =
+    (Sexp.List
+        (* Template variables often need to be threaded to other templated values *)
+      [ (String.sexp_of_t [@alloc a]) string
+      ; (Bool.sexp_of_t [@alloc a]) bool
+      ]
+    (* There are some special attributes that affect templating behavior based on
+       the current template instance *)
+    ) [@exclave_if_stack a]
+  [@@alloc a @ m = (heap @ global, stack @ local)]
+  (* [[@@alloc]] attributes allow you to have correlated template variables over
+     allocation behavior and its corresponding mode *)
+
+  let t_of_sexp _ = failwith "unimplemented"
+
+  (* The [__] symbol is often used to ignore the parameter when it can be inferred by the
+     type-checker *)
+  [@@@mode.default __ = (nonportable, portable)]
+
+  let construct_tuple a b = (a, b)
+  let tuple_fst (a, _) = a
+  let tuple_snd (_, b) = b
+end
 ```
 
 # Syntax

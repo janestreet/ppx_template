@@ -817,3 +817,84 @@ Error: ([%template]
         ("Type mismatch" (kind expression) (value (Tuple m1 m2))
          ("expected type" Mode)))
 |}]
+
+(* Cannot have explicit and non-explicit mono attribute. *)
+
+let f x = x [@mode.explicit m1] [@mode m1]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: You cannot have two attributes for the same axis.
+E.g. you cannot have [let f = ... [@mode.explicit x] [@mode y]].
+|}]
+
+let%template f x = x [@mode.explicit m1] [@mode m1]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: You cannot have two attributes for the same axis.
+E.g. you cannot have [let f = ... [@mode.explicit x] [@mode y]].
+|}]
+
+(* Cannot have explicit and non-explicit poly attribute. *)
+
+let%template f x = x [@@mode.explicit m = (m1, m2)] [@@mode m = (m3, m4)]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: You cannot have two attributes for the same axis.
+E.g. you cannot have [let f = ... [@mode.explicit x] [@mode y]].
+|}]
+
+(* explicit attribute does not exist for non-mono, poly, or floating-poly attributes *)
+
+let%template f x = x [@exclave_if_local m] [@@mode m = local]
+
+[%%expect {| |}]
+
+let%template f x = x [@exclave_if_local.explicit m] [@@mode m = local]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Attribute `exclave_if_local.explicit' was not used
+|}]
+
+let%template f x = x [@exclave_if_stack a] [@@alloc a = stack]
+
+[%%expect {| |}]
+
+let%template f x = x [@exclave_if_stack.explicit m] [@@mode m = local]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Attribute `exclave_if_stack.explicit' was not used
+|}]
+
+let%template f x = x [@@zero_alloc_if_local m] [@@mode m = local]
+
+[%%expect {| |}]
+
+let%template f x = x [@@zero_alloc_if_local.explicit m] [@@mode m = local]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Attribute `zero_alloc_if_local.explicit' was not used
+|}]
+
+let%template f x = x [@@zero_alloc_if_stack a] [@@alloc a = stack]
+
+[%%expect {| |}]
+
+let%template f x = x [@@zero_alloc_if_stack.explicit a] [@@alloc a = stack]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Attribute `zero_alloc_if_stack.explicit' was not used
+|}]

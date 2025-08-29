@@ -119,29 +119,45 @@ let () =
     ~rules:mono_attrs
 ;;
 
-let module_binding =
-  Extension.declare
-    "@template.portable"
-    Structure_item
-    Ast_pattern.(pstr (pstr_module __ ^:: nil))
-    (fun ~loc ~path:(_ : string) mod_ ->
-      [%stri
-        [%%template [%%i Portable.module_binding ~loc:{ loc with loc_ghost = true } mod_]]])
+let declare_portable_stateless_extensions context pattern f =
+  List.map Portable_stateless.all ~f:(fun portable_stateless ->
+    Extension.declare
+      (Printf.sprintf "@template.%s" (Portable_stateless.to_string portable_stateless))
+      context
+      pattern
+      (fun ~loc ~path:(_ : string) mod_ -> f portable_stateless ~loc ~mod_))
 ;;
 
-let module_declaration =
-  Extension.declare
-    "@template.portable"
+let module_bindings =
+  declare_portable_stateless_extensions
+    Structure_item
+    Ast_pattern.(pstr (pstr_module __ ^:: nil))
+    (fun portable_stateless ~loc ~mod_ ->
+      [%stri
+        [%%template
+          [%%i
+            Portable_stateless.module_binding
+              portable_stateless
+              ~loc:{ loc with loc_ghost = true }
+              ~mod_]]])
+;;
+
+let module_declarations =
+  declare_portable_stateless_extensions
     Signature_item
     Ast_pattern.(psig (Fn.id (psig_module __ ^:: nil)))
-    (fun ~loc ~path:(_ : string) mod_ ->
+    (fun portable_stateless ~loc ~mod_ ->
       [%sigi:
         [%%template:
-          [%%i Portable.module_declaration ~loc:{ loc with loc_ghost = true } mod_]]])
+          [%%i
+            Portable_stateless.module_declaration
+              portable_stateless
+              ~loc:{ loc with loc_ghost = true }
+              ~mod_]]])
 ;;
 
 let () =
   Driver.register_transformation
     "@template.portable"
-    ~extensions:[ module_binding; module_declaration ]
+    ~extensions:(module_bindings @ module_declarations)
 ;;

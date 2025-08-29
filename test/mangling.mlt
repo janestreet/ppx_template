@@ -149,8 +149,34 @@ module Weird : sig val id : 'a -> 'a end
 Line _, characters _-_:
 Error: This expression has type 'a or_null
        but an expression was expected of type ('b : value)
-       The kind of 'a or_null is immediate_or_null with 'a
-         because it is the primitive immediate_or_null type or_null.
+       The kind of 'a or_null is value_or_null mod everything with 'a
+         because it is the primitive type or_null.
        But the kind of 'a or_null must be a subkind of value
          because of the definition of id at file "mangling.mlt", line 139, characters 2-19.
+|}]
+
+let%template access_and_visibility_mangling : ('i : immediate). 'i @ a -> 'i @ v =
+  fun i -> i
+[@@mode a = (read_write, read, immutable), v = (stateful, observing, stateless)]
+;;
+
+[%%expect
+  {|
+val access_and_visibility_mangling : ('i : immediate). 'i -> 'i = <fun>
+val access_and_visibility_mangling__observing :
+  ('i : immediate). 'i -> 'i @ observing = <fun>
+val access_and_visibility_mangling__stateless :
+  ('i : immediate). 'i -> 'i @ stateless = <fun>
+val access_and_visibility_mangling__read : ('i : immediate). 'i @ read -> 'i =
+  <fun>
+val access_and_visibility_mangling__read__observing :
+  ('i : immediate). 'i @ read -> 'i @ observing = <fun>
+val access_and_visibility_mangling__read__stateless :
+  ('i : immediate). 'i @ read -> 'i @ stateless = <fun>
+val access_and_visibility_mangling__immutable :
+  ('i : immediate). 'i @ immutable -> 'i = <fun>
+val access_and_visibility_mangling__immutable__observing :
+  ('i : immediate). 'i @ immutable -> 'i @ observing = <fun>
+val access_and_visibility_mangling__immutable__stateless :
+  ('i : immediate). 'i @ immutable -> 'i @ stateless = <fun>
 |}]

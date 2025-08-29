@@ -18,6 +18,11 @@ module type Attribute = sig
   type ('a, 'b) t
 end
 
+module With_attribute_maybe_explicit (Context : Context) (Attribute : Attribute) = struct
+  type ('w, 'b) t =
+    | T : ('a, 'w) Context.t * ('a, 'b) Attribute.t Maybe_explicit.Both.t -> ('w, 'b) t
+end
+
 module With_attribute (Context : Context) (Attribute : Attribute) = struct
   type ('w, 'b) t = T : ('a, 'w) Context.t * ('a, 'b) Attribute.t -> ('w, 'b) t
 end
@@ -45,23 +50,65 @@ end = struct
   ;;
 end
 
+module type Attribute_arg = sig
+  include Attribute
+
+  val declare
+    :  string
+    -> 'a Context.t
+    -> (payload, 'k, 'b) Ast_pattern.t
+    -> 'k
+    -> ('a, 'b) t
+end
+
+module type Context_arg = sig
+  module Attribute : Attribute_arg
+  include Context
+
+  val to_ppxlib : ('a, _) t -> 'a Attribute.Context.t
+  val same_witness_exn : ('a, 'w) t -> ('b, 'w) t -> ('a, 'b) Stdlib.Type.eq
+end
+
+module Make_maybe_explicit
+    (Attribute : Attribute_arg)
+    (Context : Context_arg with module Attribute := Attribute) =
+struct
+  module Attribute_map = struct
+    type ('w, 'b) t =
+      ( 'w Context.packed
+        , ('w, 'b) With_attribute_maybe_explicit(Context)(Attribute).t )
+        Map_poly.t
+
+    let find_exn (type a w b) (t : (w, b) t) (ctx : (a, w) Context.t)
+      : (a, b) Attribute.t Maybe_explicit.Both.t
+      =
+      let (T (ctx', attribute)) = Map_poly.find_exn t (T ctx) in
+      let Equal = Context.same_witness_exn ctx ctx' in
+      attribute
+    ;;
+  end
+
+  let declare ~name ~contexts ~pattern ~k =
+    Map_poly.of_list
+      (List.map contexts ~f:(fun (T context as key : _ Context.packed) ->
+         let attribute =
+           Maybe_explicit.Both.create (fun explicit ->
+             let name =
+               match explicit with
+               | Explicit -> name ^ ".explicit"
+               | Drop_axis_if_all_defaults -> name
+             in
+             Attribute.declare ("template." ^ name) (Context.to_ppxlib context) pattern k)
+         in
+         ( key
+         , (T (context, attribute)
+            : _ With_attribute_maybe_explicit(Context)(Attribute).t) )))
+  ;;
+end
+
 module Make
-    (Attribute : sig
-       include Attribute
-
-       val declare
-         :  string
-         -> 'a Context.t
-         -> (payload, 'k, 'b) Ast_pattern.t
-         -> 'k
-         -> ('a, 'b) t
-     end)
-    (Context : sig
-       include Context
-
-       val to_ppxlib : ('a, _) t -> 'a Attribute.Context.t
-       val same_witness_exn : ('a, 'w) t -> ('b, 'w) t -> ('a, 'b) Stdlib.Type.eq
-     end) =
+    (Attribute : Attribute_arg)
+    (Context : Context_arg with module Attribute := Attribute) =
 struct
   module Attribute_map = struct
     type ('w, 'b) t =
@@ -262,11 +309,46 @@ module Context = struct
         | Type_declaration
         | Module_type_declaration ) ) -> assert false
   ;;
+
+  let location : type a b. (a, b) t -> a -> Location.t = function
+    | Core_type -> fun x -> x.ptyp_loc
+    | Expression -> fun x -> x.pexp_loc
+    | Module_expr -> fun x -> x.pmod_loc
+    | Module_type -> fun x -> x.pmty_loc
+    | Value_binding -> fun x -> x.pvb_loc
+    | Value_description -> fun x -> x.pval_loc
+    | Module_binding -> fun x -> x.pmb_loc
+    | Module_declaration -> fun x -> x.pmd_loc
+    | Type_declaration -> fun x -> x.ptype_loc
+    | Module_type_declaration -> fun x -> x.pmtd_loc
+    | Include_infos -> fun x -> x.pincl_loc
+  ;;
 end
 
-include Make (Attribute) (Context)
+include Make_maybe_explicit (Attribute) (Context)
 
-let consume_attr attr ctx ast = Attribute.consume (Attribute_map.find_exn attr ctx) ast
+let raise_you_can_only_use_one_attribute_per_axis ~loc =
+  Location.raise_errorf
+    ~loc
+    "You cannot have two attributes for the same axis.\n\
+     E.g. you cannot have [let f = ... [@@mode.explicit x] [@@mode y]]."
+;;
+
+let consume_attr attr ctx ast =
+  Maybe_explicit.Both.opt_fold_map
+    (Attribute_map.find_exn attr ctx)
+    ~init:ast
+    ~f:(fun ast attr ->
+      match Attribute.consume attr ast with
+      | None -> ast, None
+      | Some (ast, res) -> ast, Some res)
+  |> function
+  | _, Neither -> None
+  | ast, One res -> Some (ast, res)
+  | _, Both _ ->
+    let loc = Context.location ctx ast in
+    raise_you_can_only_use_one_attribute_per_axis ~loc
+;;
 
 type ('w, 'b) t = { f : 'a. ('a, 'w) Context.t -> 'a -> 'a * 'b } [@@unboxed]
 
@@ -422,8 +504,9 @@ let consume_poly ctx item =
     | Some (item, bindings) -> item, Some bindings
   in
   let type_check_opt type_check bindings ~expected ~mangle_axis ~mangle =
-    Option.map bindings ~f:(fun binding ->
-      type_check binding ~expected ~mangle_axis ~mangle)
+    Option.map bindings ~f:(fun bindings ->
+      Maybe_explicit.map_result bindings ~f:(fun bindings ->
+        type_check bindings ~expected ~mangle_axis ~mangle))
   in
   let item, kinds = consume Poly.kind_attr item in
   let item, modes = consume Poly.mode_attr item in
@@ -480,7 +563,9 @@ let consume_poly ctx item =
       |> Result.collect_errors
     in
     let+ (_ : unit list) =
-      untyped |> List.map ~f:Poly.validate_bindings |> Result.collect_errors
+      untyped
+      |> List.map ~f:(fun (_explicitness, binding) -> binding |> Poly.validate_bindings)
+      |> Result.collect_errors
     in
     typed
   in
@@ -522,7 +607,7 @@ let consume_mono ctx item =
     | Some (item, vals) ->
       ( item
       , let* mono = mono in
-        let+ vals = vals in
+        let+ vals = Maybe_explicit.ok vals in
         Typed.Axis.Map.add (P axis) vals mono )
   in
   let mono = Ok Typed.Axis.Map.empty in
@@ -534,62 +619,6 @@ let consume_mono ctx item =
 ;;
 
 let mono = { f = consume_mono }
-
-let consume_attr_if attr =
-  { f =
-      (fun ctx item ->
-        match consume_attr attr ctx item with
-        | None -> item, Ok None
-        | Some (item, Ok value) -> item, Ok (Some value)
-        | Some (item, (Error _ as err)) -> item, err)
-  }
-;;
-
-module Exclave_if = struct
-  let declare name expected =
-    declare
-      ~name
-      ~contexts:[ T Expression ]
-      ~pattern:(Ast_pattern_helpers.single_ident ())
-      ~k:(fun { txt = expr; loc } ->
-        (let+ expr = Typed.Expression.type_check expr ~expected in
-         { txt = expr; loc })
-        |> Type_error.lift_to_error_result)
-  ;;
-
-  let local_attr = declare "exclave_if_local" Type.mode
-  let stack_attr = declare "exclave_if_stack" Type.alloc
-end
-
-let exclave_if_local = consume_attr_if Exclave_if.local_attr
-let exclave_if_stack = consume_attr_if Exclave_if.stack_attr
-
-module Zero_alloc_if = struct
-  let pattern () =
-    let open Ast_pattern in
-    single_expr_payload
-      (map (Ast_pattern_helpers.ident_expr ()) ~f:(fun k mode -> k mode [])
-       ||| pexp_apply (Ast_pattern_helpers.ident_expr ()) (many (pair nolabel __)))
-    |> map2' ~f:(fun loc mode payload -> loc, mode, payload)
-  ;;
-
-  let declare name expected =
-    declare
-      ~name
-      ~contexts:[ T Expression; T Value_binding; T Value_description ]
-      ~pattern:(pattern ())
-      ~k:(fun (loc, { txt = expr; loc = mode_loc }, args) ->
-        (let+ expr = Typed.Expression.type_check expr ~expected in
-         loc, { txt = expr; loc = mode_loc }, args)
-        |> Type_error.lift_to_error_result)
-  ;;
-
-  let local_attr = declare "zero_alloc_if_local" Type.mode
-  let stack_attr = declare "zero_alloc_if_stack" Type.alloc
-end
-
-let zero_alloc_if_local = consume_attr_if Zero_alloc_if.local_attr
-let zero_alloc_if_stack = consume_attr_if Zero_alloc_if.stack_attr
 
 module Floating = struct
   module Context = struct
@@ -615,12 +644,17 @@ module Floating = struct
     ;;
   end
 
-  include Make (Attribute.Floating) (Context)
+  include Make_maybe_explicit (Attribute.Floating) (Context)
 
   let convert_attrs attrs ctx ast =
-    Attribute.Floating.convert
-      (List.map attrs ~f:(fun attr -> Attribute_map.find_exn attr ctx))
-      ast
+    attrs
+    |> List.map ~f:(fun attr -> Attribute_map.find_exn attr ctx)
+    |> Maybe_explicit.Both.all
+    |> Maybe_explicit.Both.opt_map ~f:(fun attr -> Attribute.Floating.convert attr ast)
+    |> function
+    | Neither -> None
+    | One res -> Some (Maybe_explicit.ok res)
+    | Both _ -> raise_you_can_only_use_one_attribute_per_axis ~loc:Location.none
   ;;
 
   module Attached_poly = Poly
@@ -709,8 +743,10 @@ module Floating = struct
         let name = attr.attr_name.txt in
         if String.is_prefix name ~prefix:"template." then name else "template." ^ name
       in
-      List.map all_attrs ~f:(fun attr ->
-        Attribute.Floating.name (Attribute_map.find_exn attr ctx))
+      List.concat_map all_attrs ~f:(fun attr ->
+        Attribute_map.find_exn attr ctx
+        |> Maybe_explicit.Both.extract_list
+        |> List.map ~f:Attribute.Floating.name)
       |> List.exists ~f:(fun attr_name -> String.equal attr_name ast_attr_name)
   ;;
 
@@ -721,3 +757,69 @@ module Floating = struct
     | Some (Error _ as err) -> err
   ;;
 end
+
+module Non_explicit = struct
+  (* We don't want to shadow from [Make_maybe_explicit] *)
+  open Make (Attribute) (Context)
+
+  let consume_attr_if attr =
+    let consume_attr attr ctx ast =
+      Attribute.consume (Attribute_map.find_exn attr ctx) ast
+    in
+    { f =
+        (fun ctx item ->
+          match consume_attr attr ctx item with
+          | None -> item, Ok None
+          | Some (item, Ok value) -> item, Ok (Some value)
+          | Some (item, (Error _ as err)) -> item, err)
+    }
+  ;;
+
+  module Exclave_if = struct
+    let declare name expected =
+      declare
+        ~name
+        ~contexts:[ T Expression ]
+        ~pattern:(Ast_pattern_helpers.single_ident ())
+        ~k:(fun { txt = expr; loc } ->
+          (let+ expr = Typed.Expression.type_check expr ~expected in
+           { txt = expr; loc })
+          |> Type_error.lift_to_error_result)
+    ;;
+
+    let local_attr = declare "exclave_if_local" Type.mode
+    let stack_attr = declare "exclave_if_stack" Type.alloc
+  end
+
+  let exclave_if_local = consume_attr_if Exclave_if.local_attr
+  let exclave_if_stack = consume_attr_if Exclave_if.stack_attr
+
+  module Zero_alloc_if = struct
+    let pattern () =
+      let open Ast_pattern in
+      single_expr_payload
+        (map (Ast_pattern_helpers.ident_expr ()) ~f:(fun k mode -> k mode [])
+         ||| pexp_apply (Ast_pattern_helpers.ident_expr ()) (many (pair nolabel __)))
+      |> map2' ~f:(fun loc mode payload -> loc, mode, payload)
+    ;;
+
+    let declare name expected =
+      declare
+        ~name
+        ~contexts:[ T Expression; T Value_binding; T Value_description ]
+        ~pattern:(pattern ())
+        ~k:(fun (loc, { txt = expr; loc = mode_loc }, args) ->
+          (let+ expr = Typed.Expression.type_check expr ~expected in
+           loc, { txt = expr; loc = mode_loc }, args)
+          |> Type_error.lift_to_error_result)
+    ;;
+
+    let local_attr = declare "zero_alloc_if_local" Type.mode
+    let stack_attr = declare "zero_alloc_if_stack" Type.alloc
+  end
+
+  let zero_alloc_if_local = consume_attr_if Zero_alloc_if.local_attr
+  let zero_alloc_if_stack = consume_attr_if Zero_alloc_if.stack_attr
+end
+
+include Non_explicit

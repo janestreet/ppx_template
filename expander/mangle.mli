@@ -5,7 +5,7 @@ open Language.Typed
 module Suffix : sig
   type t
 
-  val create : Value.Basic.packed list Axis.Map.t -> t
+  val create : Value.Basic.packed list Maybe_explicit.t Axis.Map.t -> t
 end
 
 module Result : sig
@@ -35,6 +35,6 @@ val t : (Suffix.t, Result.t) Ast_traverse.lift_map_with_context
 val mangle
   :  'a Attributes.Context.mono
   -> 'a
-  -> Expression.Basic.packed Loc.t list Axis.Map.t
+  -> Expression.Basic.packed Loc.t list Maybe_explicit.t Axis.Map.t
   -> env:Env.t
   -> 'a
