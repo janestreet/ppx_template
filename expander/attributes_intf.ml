@@ -4,7 +4,7 @@ open Language.Typed
 
 module Definitions = struct
   module Poly = struct
-    type 'mangle binding = Binding : (_, 'mangle) Binding.t -> 'mangle binding
+    type 'mangle binding = Binding : (_, 'mangle) Binding.with_mangle -> 'mangle binding
     type t = Poly : 'mangle Type.basic Axis.t * 'mangle Type.basic binding list -> t
   end
 
@@ -91,14 +91,7 @@ module type Attributes = sig
   (** [consume t ctx item] runs the handler [t] in the context [ctx] on [item]. The
       handler [t] strips its corresponding attributes from [item] in addition to producing
       its output. *)
-  val consume : ('w, 'b) t -> ('a, 'w) Context.t -> 'a -> 'a * 'b
-
-  (** Like {!consume}, but propagates errors for easier monadic binding. *)
-  val consume_result
-    :  ('w, ('b, 'err) result) t
-    -> ('a, 'w) Context.t
-    -> 'a
-    -> ('a * 'b, 'err) result
+  val consume : ('w, 'b) t -> ('a, 'w) Context.t -> 'a -> ('a * 'b, Syntax_error.t) result
 
   (** A map from [('a, 'w) Context.t] to [('a, 'b) Attribute.t]. *)
   module Attribute_map : sig
@@ -117,7 +110,7 @@ module type Attributes = sig
   (** A handler for attributes that make definitions/declarations polymorphic. Might
       return an [Error _] if the attribute's payload is malformed. Defaults to
       [Ok { kinds = None; modes = None }]. *)
-  val poly : (poly_w, (Poly.t Maybe_explicit.t list, Sexp.t) result) t
+  val poly : (poly_w, Poly.t Maybe_explicit.t list) t
 
   module Mono : sig
     include module type of struct
@@ -127,9 +120,12 @@ module type Attributes = sig
     val contexts : mono_w Context.packed list
 
     type attr :=
-      (mono_w, (Expression.Basic.packed Loc.t list, Sexp.t) result) Attribute_map.t
+      ( mono_w
+        , (Expression.Basic.packed Loc.t list, Syntax_error.t) result )
+        Attribute_map.t
 
     val kind_attr : attr
+    val kind_set_attr : attr
     val mode_attr : attr
     val modality_attr : attr
     val alloc_attr : attr
@@ -137,16 +133,16 @@ module type Attributes = sig
 
   (** A handler for attributes that mangle identifiers to the correct monomorphized name.
       Defaults to [{ kinds = []; modes = [] }]. *)
-  val mono : (mono_w, (Mono.t, Sexp.t) result) t
+  val mono : (mono_w, Mono.t) t
 
   (** A handler for attributes that optionally insert [exclave_] markers. We expect to
       replace these attributes with mode-polymorphic tailcalls and/or unboxed types. *)
   val exclave_if_local
-    : ([ `expression ], (Type.mode Expression.t Loc.t option, Sexp.t) result) t
+    : ([ `expression ], (Type.mode, Expression.singleton) Expression.t Loc.t option) t
 
   (** Like {!exclave_if_local}, but for allocation identifiers. *)
   val exclave_if_stack
-    : ([ `expression ], (Type.alloc Expression.t Loc.t option, Sexp.t) result) t
+    : ([ `expression ], (Type.alloc, Expression.singleton) Expression.t Loc.t option) t
 
   (** A handler for attributes that optionally annotate code as zero-alloc. When the
       attribute is present, produces [Some (loc, mode, payload)], where [loc] is the
@@ -154,20 +150,27 @@ module type Attributes = sig
       payload to be given to the [[@@zero_alloc]] attribute. *)
   val zero_alloc_if_local
     : ( zero_alloc_if_w
-        , ( (location * Type.mode Expression.t Loc.t * expression list) option
-            , Sexp.t )
-            result )
+        , (location
+          * (Type.mode, Expression.singleton) Expression.t Loc.t
+          * expression list)
+            option )
         t
 
   (** Like {!zero_alloc_if_local}, but for allocation identifiers. *)
   val zero_alloc_if_stack
     : ( zero_alloc_if_w
-        , ( (location * Type.alloc Expression.t Loc.t * expression list) option
-            , Sexp.t )
-            result )
+        , (location
+          * (Type.alloc, Expression.singleton) Expression.t Loc.t
+          * expression list)
+            option )
         t
 
-  val raise_you_can_only_use_one_attribute_per_axis : loc:location -> _
+  val with_ : ([ `module_type ], signature option) t
+  val with_attr : (module_type, (signature, Syntax_error.t) result) Attribute.t
+
+  val error_you_can_only_use_one_attribute_per_axis
+    :  loc:location
+    -> (_, Syntax_error.t) result
 
   module Floating : sig
     type poly :=
@@ -181,25 +184,46 @@ module type Attributes = sig
         | Signature_item : (signature_item, [> `signature_item ]) t
 
       type nonrec 'a poly = ('a, poly) t
+
+      val location : ('a, 'b) t -> 'a -> Location.t
+    end
+
+    module Define : sig
+      type t = Define : 'a Type.basic Binding.t list -> t
     end
 
     module Poly : sig
+      type kind =
+        | Never_add_mangler
+        | Always_add_mangler
+        | Add_mangler_if_more_than_one_elt
+        (** Behaves like [Always_add_mangler] if the set on the RHS of the binding, when
+            evaluated with [Expand_atoms_bound_to_sets], has more than one element, and
+            like [Never_add_mangler] otherwise.
+
+            For [Add_mangler_if_more_than_one_elt] specifically, we only permit exactly
+            one [(_, singleton) Expression.t] on the RHS. Loosely speaking, if the
+            expression on the RHS contains a [Union], it is probably true that it always
+            evaluates to a set with more than one element, and the [Always_add_mangler]
+            version of the attribute should be used instead. *)
+
       type t =
         { bindings : Poly.t
-        ; default : bool
+        ; kind : kind
         }
+
+      (** Check if the provided ast node is a floating poly template attribute. Does not
+          mark the attribute as seen. *)
+      val is_present : ('a, poly) Context.t -> 'a -> bool
     end
 
-    (** Check if the provided ast node is a floating template attribute. Does not mark the
-        attribute as seen. *)
-    val is_present : ('a, poly) Context.t -> 'a -> bool
+    type t =
+      | Define of Define.t
+      | Poly of Poly.t Maybe_explicit.t
 
     (** Check if the provided ast node is a floating template attribute, and evaluate its
         contents. Marks the attribute as seen. Returns an [Error _] if the payload of the
         attribute is malformed or inconsistent. *)
-    val convert_poly
-      :  ('a, poly) Context.t
-      -> 'a
-      -> (Poly.t Maybe_explicit.t option, Sexp.t) result
+    val convert : ('a, poly) Context.t -> 'a -> (t option, Syntax_error.t) result
   end
 end

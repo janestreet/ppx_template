@@ -59,7 +59,9 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate expressions for single pattern" (x (value))))
+Error: [%template]: duplicate expressions for single pattern:
+       (pattern x)
+       (duplicates (value))
 |}]
 
 (* Duplicate jkinds for single kind variable (structure). *)
@@ -70,7 +72,9 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate expressions for single pattern" (x (value))))
+Error: [%template]: duplicate expressions for single pattern:
+       (pattern x)
+       (duplicates (value))
 |}]
 
 (* Duplicate jkinds for single kind variable (expression). *)
@@ -82,7 +86,9 @@ let () =
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate expressions for single pattern" (x (value))))
+Error: [%template]: duplicate expressions for single pattern:
+       (pattern x)
+       (duplicates (value))
 |}]
 
 (* Duplicate jkinds for single kind variable (module declaration). *)
@@ -93,7 +99,9 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate expressions for single pattern" (x (value))))
+Error: [%template]: duplicate expressions for single pattern:
+       (pattern x)
+       (duplicates (value))
 |}]
 
 (* Duplicate jkinds for single kind variable (module expression). *)
@@ -102,7 +110,9 @@ module%template _ = struct end [@@kind x = (value, value)]
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate expressions for single pattern" (x (value))))
+Error: [%template]: duplicate expressions for single pattern:
+       (pattern x)
+       (duplicates (value))
 |}]
 
 (* Duplicate kind variables (signature). *)
@@ -115,7 +125,7 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate patterns" (x)))
+Error: [%template]: duplicate patterns: (x)
 |}]
 
 (* Duplicate kind variables (structure). *)
@@ -126,7 +136,7 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate patterns" (x)))
+Error: [%template]: duplicate patterns: (x)
 |}]
 
 (* Duplicate kind variables (expression). *)
@@ -138,7 +148,7 @@ let () =
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate patterns" (x)))
+Error: [%template]: duplicate patterns: (x)
 |}]
 
 (* Duplicate kind variables (module declaration). *)
@@ -149,7 +159,7 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate patterns" (x)))
+Error: [%template]: duplicate patterns: (x)
 |}]
 
 (* Duplicate kind variables (module expression). *)
@@ -158,7 +168,7 @@ module%template _ = struct end [@@kind x = value, x = value]
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate patterns" (x)))
+Error: [%template]: duplicate patterns: (x)
 |}]
 
 (* Check error printing of more complicated kind expressions. *)
@@ -176,11 +186,11 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template]
-        ("duplicate expressions for single pattern"
-         (k
-          ((Product (Mod value (portable)) (Mod value (contended)))
-           (Mod (Product value bits32) (contended portable))))))
+Error: [%template]: duplicate expressions for single pattern:
+       (pattern k)
+       (duplicates
+        ((Product (Mod value (portable)) (Mod value (contended)))
+         (Mod (Product value bits32) (contended portable))))
 |}]
 
 (* Missing [@kind: l] on recursive call. *)
@@ -207,11 +217,11 @@ Error: Signature mismatch:
        The type n:int -> ('a -> 'a) -> 'a -> 'a
        is not compatible with the type n:int -> ('b -> 'b) -> 'b -> 'b
        The layout of 'a is float64
-         because of the definition of apply_n_times__float64 at file "test.mlt", lines 188-189, characters 2-31.
+         because of the definition of apply_n_times__float64 at file "test.mlt", lines 198-199, characters 2-31.
        But the layout of 'a must be a sublayout of value
-         because of the definition of apply_n_times__float64 at file "test.mlt", lines 191-192, characters 33-58.
-       File "test.mlt", lines 188-189, characters 2-31: Expected declaration
-       File "test.mlt", line 191, characters 19-32: Actual declaration
+         because of the definition of apply_n_times__float64 at file "test.mlt", lines 201-202, characters 33-58.
+       File "test.mlt", lines 198-199, characters 2-31: Expected declaration
+       File "test.mlt", line 201, characters 19-32: Actual declaration
 |}]
 
 (* Missing [@kind: l] on recursive call (as above, but with a newtype expression). *)
@@ -297,9 +307,9 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template]
-        ("duplicate expressions for single pattern" (x ((Product value
-       bits32)))))
+Error: [%template]: duplicate expressions for single pattern:
+       (pattern x)
+       (duplicates ((Product value bits32)))
 |}]
 
 (* Demonstrate error message for incorrect [@exclave_if_local] usage. *)
@@ -312,10 +322,9 @@ let%template _ : _ =
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template]
-        "exclave_if_local is only allowed on tailcalls or syntactic
-       allocations (e.g. tuples) consisting entirely of identifiers, record
-       fields, and/or constants")
+Error: [%template]: exclave_if_local is only allowed on tailcalls or
+       syntactic allocations (e.g. tuples) consisting entirely of
+       identifiers, record fields, and/or constants
 |}]
 
 (* [@exclave_if_local] isn't allowed on tailcalls if the arguments aren't constant. *)
@@ -324,10 +333,9 @@ let%template g _ : _ = f (Some 1) [@exclave_if_local local]
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template]
-        "exclave_if_local is only allowed on tailcalls or syntactic
-       allocations (e.g. tuples) consisting entirely of identifiers, record
-       fields, and/or constants")
+Error: [%template]: exclave_if_local is only allowed on tailcalls or
+       syntactic allocations (e.g. tuples) consisting entirely of
+       identifiers, record fields, and/or constants
 |}]
 
 (* [@exclave_if_local] is allowed on tailcalls if the arguments are constant constructors. *)
@@ -368,7 +376,7 @@ let%template _ : _ = () [@kind Foo]
 [%%expect
   {|
 Line _, characters _-_:
-Error: [ppx_template] syntax error: constructors are not allowed in template expressions
+Error: [ppx_template] syntax error: no constructors in template expressions expected
 |}]
 
 (* When [ppx_template] produces error nodes, be sure to mark any attributes in the dropped
@@ -379,10 +387,9 @@ let%template f x = (g [@dropped]) (g x) [@exclave_if_local bad_attribute_locatio
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template]
-        "exclave_if_local is only allowed on tailcalls or syntactic
-       allocations (e.g. tuples) consisting entirely of identifiers, record
-       fields, and/or constants")
+Error: [%template]: exclave_if_local is only allowed on tailcalls or
+       syntactic allocations (e.g. tuples) consisting entirely of
+       identifiers, record fields, and/or constants
 |}]
 
 let%template _ : _ = f (x [@dropped]) [@mode bad_attribute_location]
@@ -399,7 +406,7 @@ let%template[@mode repeat = local, repeat = global] x = (x [@dropped])
 [%%expect
   {|
 Line _, characters _-_:
-Error: ([%template] ("duplicate patterns" (repeat)))
+Error: [%template]: duplicate patterns: (repeat)
 |}]
 
   type%template t : k [@@kind k = ((value mod portable) & value)]
@@ -591,7 +598,7 @@ let%template f x = x [@@alloc a = heap_global]
   {|
 Line _, characters _-_:
 Error: Unbound template identifier [heap_global] of type [Alloc].
-Hint: Did you mean [heap]?
+       Hint: Did you mean [heap]?
 |}]
 
 let%template f x = x [@@alloc a = stack_local]
@@ -600,7 +607,7 @@ let%template f x = x [@@alloc a = stack_local]
   {|
 Line _, characters _-_:
 Error: Unbound template identifier [stack_local] of type [Alloc].
-Hint: Did you mean [stack]?
+       Hint: Did you mean [stack]?
 |}]
 
 let%template f x = x [@@alloc a @ m = heap]
@@ -609,7 +616,7 @@ let%template f x = x [@@alloc a @ m = heap]
   {|
 Line _, characters _-_:
 Error: Unbound template identifier [heap] of type [(Alloc @ Mode)].
-Hint: Did you mean [heap_global]?
+       Hint: Did you mean [heap_global]?
 |}]
 
 let%template f x = x [@@alloc a @ m = stack]
@@ -618,7 +625,7 @@ let%template f x = x [@@alloc a @ m = stack]
   {|
 Line _, characters _-_:
 Error: Unbound template identifier [stack] of type [(Alloc @ Mode)].
-Hint: Did you mean [stack_local]?
+       Hint: Did you mean [stack_local]?
 |}]
 
 let%template f x = x [@alloc heap_global]
@@ -627,7 +634,7 @@ let%template f x = x [@alloc heap_global]
   {|
 Line _, characters _-_:
 Error: Unbound template identifier [heap_global] of type [Alloc].
-Hint: Did you mean [heap]?
+       Hint: Did you mean [heap]?
 |}]
 
 let%template f x = x [@alloc stack_local]
@@ -636,8 +643,9 @@ let%template f x = x [@alloc stack_local]
   {|
 Line _, characters _-_:
 Error: Unbound template identifier [stack_local] of type [Alloc].
-Hint: Did you mean [stack]?
+       Hint: Did you mean [stack]?
 |}]
+
 
 let%template f x = x [@@mode m = stack @ local]
 
@@ -645,8 +653,10 @@ let%template f x = x [@@mode m = stack @ local]
   {|
 Line _, characters _-_:
 Error: ([%template]
-        ("Type mismatch" (kind expression) (value (Tuple stack local))
-         ("expected type" Mode)))
+        ("Type mismatch" (kind expression) (value (Comma_separated stack
+       local))
+         ("expected type" Mode) ("expected sets" singleton)
+         (hint "mode sets are not supported")))
 |}]
 
 let%template f x = x [@@mode m = value mod global]
@@ -656,7 +666,7 @@ let%template f x = x [@@mode m = value mod global]
 Line _, characters _-_:
 Error: ([%template]
         ("Type mismatch" (kind expression) (value (Mod value (global)))
-         ("expected type" Mode)))
+         ("expected type" Mode) ("expected sets" singleton)))
 |}]
 
 let%template f x = x [@@mode m = (value & value)]
@@ -666,7 +676,7 @@ let%template f x = x [@@mode m = (value & value)]
 Line _, characters _-_:
 Error: ([%template]
         ("Type mismatch" (kind expression) (value (Product value value))
-         ("expected type" Mode)))
+         ("expected type" Mode) ("expected sets" singleton)))
 |}]
 
 let%template f x = x
@@ -677,12 +687,12 @@ let%template f x = x
   {|
 Line _, characters _-_:
 Error: ([%template]
-        (("Type mismatch" (kind expression) (value (Tuple heap global))
-          ("expected type" Kind))
-         ("Type mismatch" (kind expression) (value (Product value value))
-          ("expected type" Mode))
-         ("Type mismatch" (kind expression) (value (Product value value))
-          ("expected type" (Alloc @ Mode)))))
+        ("Type mismatch" (kind expression) (value (Product value value))
+         ("expected type" Mode) ("expected sets" singleton)))
+Line _, characters _-_:
+  ([%template]
+   ("Type mismatch" (kind expression) (value (Product value value))
+    ("expected type" (Alloc @ Mode)) ("expected sets" singleton)))
 |}]
 
 let%template f = (f [@mode (value & value) (value mod portable)])
@@ -691,10 +701,12 @@ let%template f = (f [@mode (value & value) (value mod portable)])
   {|
 Line _, characters _-_:
 Error: ([%template]
-        (("Type mismatch" (kind expression) (value (Product value value))
-          ("expected type" Mode))
-         ("Type mismatch" (kind expression) (value (Mod value (portable)))
-          ("expected type" Mode))))
+        ("Type mismatch" (kind expression) (value (Product value value))
+         ("expected type" Mode) ("expected sets" singleton)))
+Line _, characters _-_:
+  ([%template]
+   ("Type mismatch" (kind expression) (value (Mod value (portable)))
+    ("expected type" Mode) ("expected sets" singleton)))
 |}]
 
 module%template _ = struct
@@ -718,7 +730,9 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: ident expected
+Error: ([%template]
+        ("Type mismatch" (kind expression) (value (Mod value (local)))
+         ("expected type" Mode) ("expected sets" singleton)))
 |}]
 
 let%template f x = x [@@mode a @ m = stack @ local]
@@ -732,8 +746,10 @@ let%template f x = x [@@mode a = (stack @ local, heap)]
   {|
 Line _, characters _-_:
 Error: ([%template]
-        ("Type mismatch" (kind expression) (value (Tuple stack local))
-         ("expected type" Mode)))
+        ("Type mismatch" (kind expression) (value (Comma_separated stack
+       local))
+         ("expected type" Mode) ("expected sets" singleton)
+         (hint "mode sets are not supported")))
 |}]
 
 let%template f x = x [@@alloc a = (stack, heap @ global)]
@@ -742,7 +758,7 @@ let%template f x = x [@@alloc a = (stack, heap @ global)]
   {|
 Line _, characters _-_:
 Error: Unbound template identifier [stack] of type [(Alloc @ Mode)].
-Hint: Did you mean [stack_local]?
+       Hint: Did you mean [stack_local]?
 |}]
 
 let%template f x = x [@@kind a = stack]
@@ -772,8 +788,10 @@ let%template f x = x [@@mode a = ((local, local), global)]
   {|
 Line _, characters _-_:
 Error: ([%template]
-        ("Type mismatch" (kind expression) (value (Tuple local local))
-         ("expected type" Mode)))
+        ("Type mismatch" (kind expression) (value (Comma_separated local
+       local))
+         ("expected type" Mode) ("expected sets" singleton)
+         (hint "mode sets are not supported")))
 |}]
 
 let%template f x = x [@@mode a = ((local, local), (global, global))]
@@ -782,8 +800,10 @@ let%template f x = x [@@mode a = ((local, local), (global, global))]
   {|
 Line _, characters _-_:
 Error: ([%template]
-        ("Type mismatch" (kind expression) (value (Tuple local local))
-         ("expected type" Mode)))
+        ("Type mismatch" (kind expression) (value (Comma_separated local
+       local))
+         ("expected type" Mode) ("expected sets" singleton)
+         (hint "mode sets are not supported")))
 |}]
 
 let%template f x = x [@exclave_if_stack a2]
@@ -795,7 +815,7 @@ let%template f x = x [@exclave_if_stack a2]
   {|
 Line _, characters _-_:
 Error: Unbound template identifier [a2] of type [Alloc].
-Hint: There is a template identifier [a2] in scope with type [Mode].
+       Hint: There is a template identifier [a2] in scope with type [Mode].
 |}]
 
 let%template f x = x [@@mode (m1, m2, m3, m4) = ((m1, m2), (m3, m4))]
@@ -804,7 +824,8 @@ let%template f x = x [@@mode (m1, m2, m3, m4) = ((m1, m2), (m3, m4))]
   {|
 Line _, characters _-_:
 Error: ([%template]
-        ("Tuple length mismatch" (kind expression) (value (Tuple m1 m2))
+        ("Tuple length mismatch" (kind expression) (value (Comma_separated m1
+       m2))
          ("expected type" (Tuple Mode Mode Mode Mode))))
 |}]
 
@@ -814,8 +835,9 @@ let%template f x = x [@@mode (m1, m2) = (((m1, m2), (m3, m4)), ((m5, m6), (m7, m
   {|
 Line _, characters _-_:
 Error: ([%template]
-        ("Type mismatch" (kind expression) (value (Tuple m1 m2))
-         ("expected type" Mode)))
+        ("Type mismatch" (kind expression) (value (Comma_separated m1 m2))
+         ("expected type" Mode) ("expected sets" singleton)
+         (hint "sets not allowed inside tuples")))
 |}]
 
 (* Cannot have explicit and non-explicit mono attribute. *)
@@ -826,7 +848,7 @@ let f x = x [@mode.explicit m1] [@mode m1]
   {|
 Line _, characters _-_:
 Error: You cannot have two attributes for the same axis.
-E.g. you cannot have [let f = ... [@mode.explicit x] [@mode y]].
+       E.g. you cannot have [let f = ... [@mode.explicit x] [@mode y]].
 |}]
 
 let%template f x = x [@mode.explicit m1] [@mode m1]
@@ -835,7 +857,7 @@ let%template f x = x [@mode.explicit m1] [@mode m1]
   {|
 Line _, characters _-_:
 Error: You cannot have two attributes for the same axis.
-E.g. you cannot have [let f = ... [@mode.explicit x] [@mode y]].
+       E.g. you cannot have [let f = ... [@mode.explicit x] [@mode y]].
 |}]
 
 (* Cannot have explicit and non-explicit poly attribute. *)
@@ -846,7 +868,7 @@ let%template f x = x [@@mode.explicit m = (m1, m2)] [@@mode m = (m3, m4)]
   {|
 Line _, characters _-_:
 Error: You cannot have two attributes for the same axis.
-E.g. you cannot have [let f = ... [@mode.explicit x] [@mode y]].
+       E.g. you cannot have [let f = ... [@mode.explicit x] [@mode y]].
 |}]
 
 (* explicit attribute does not exist for non-mono, poly, or floating-poly attributes *)
@@ -897,4 +919,483 @@ let%template f x = x [@@zero_alloc_if_stack.explicit a] [@@alloc a = stack]
   {|
 Line _, characters _-_:
 Error: Attribute `zero_alloc_if_stack.explicit' was not used
+|}]
+
+(* shadowing tests *)
+
+(* different major axes *)
+
+[%%template
+[@@@mode m = (local, global)]
+[@@@kind.default m = (value, bits64)]
+
+let id (x : (_ : m)) = x]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: shadowing variables from a different namespace is prohibited
+       attempting to bind
+         identifier 'm'
+         in namespace 'Kind'
+       but it is already bound
+         in namespace '(Mode Locality)'
+         to the value 'local'
+         and when fully expanded '(local)'
+|}]
+
+[%%template
+[@@@alloc m @ a = heap_global]
+
+let id (x @ m) = x [@@mode m = (local, m)]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: shadowing variables from a different namespace is prohibited
+       attempting to bind
+         identifier 'm'
+         in namespace '(Mode Locality)'
+       but it is already bound
+         in namespace 'Alloc'
+         to the value 'heap'
+         and when fully expanded '(heap)'
+|}]
+
+(* sub-axes of mode *)
+
+[%%template
+[@@@mode m = (global, local)]
+[@@@mode.default m = (portable, nonportable)]
+
+let id (x @ m) = x]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: shadowing variables from a different namespace is prohibited
+       attempting to bind
+         identifier 'm'
+         in namespace '(Mode Portability)'
+       but it is already bound
+         in namespace '(Mode Locality)'
+         to the value 'global'
+         and when fully expanded '(global)'
+|}]
+
+(* we correctly identify the sub-axis through an alias *)
+
+[%%template
+[@@@mode m = (global, local)]
+[@@@mode n = (nonportable, portable)]
+[@@@mode.default m = n]
+
+let id (x @ m) = x]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: shadowing variables from a different namespace is prohibited
+       attempting to bind
+         identifier 'm'
+         in namespace '(Mode Portability)'
+       but it is already bound
+         in namespace '(Mode Locality)'
+         to the value 'global'
+         and when fully expanded '(global)'
+|}]
+
+(* only one mode unknown *)
+
+[%%template
+[@@@mode m = (global, local)]
+
+let id (x @ m) = x [@@mode m = (n, o)]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: shadowing variables from a different namespace is prohibited
+       attempting to bind
+         identifier 'm'
+         in namespace '(Mode unrecognized)'
+       but it is already bound
+         in namespace '(Mode Locality)'
+         to the value 'global'
+         and when fully expanded '(global)'
+|}]
+
+(* both modes unknown permits the binding *)
+
+[%%template
+[@@@mode m = (n, o)]
+[@@@mode.default m = (p, q)]
+
+let id (x @ m) = x]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unrecognized mode p.
+|}]
+
+(* shadowing identifier is from a tuple *)
+
+[%%template
+[@@@mode m = (portable, non_portable)]
+[@@@alloc.default a @ m = (heap_global, stack_local)]
+
+let id (x @ m) = x [@exclave_if_stack a]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: shadowing variables from a different namespace is prohibited
+       attempting to bind
+         identifier 'm'
+         in namespace '(Mode Locality)'
+       but it is already bound
+         in namespace '(Mode Portability)'
+         to the value 'portable'
+         and when fully expanded '(portable)'
+|}]
+
+[%%template
+[@@@mode m = (local, global)]
+[@@@mode (m, n) = ((nonportable, uncontended), (portable, contended))]
+
+let id (x @ m) = x]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: shadowing variables from a different namespace is prohibited
+       attempting to bind
+         identifier 'm'
+         in namespace '(Mode Portability)'
+       but it is already bound
+         in namespace '(Mode Locality)'
+         to the value 'local'
+         and when fully expanded '(local)'
+|}]
+
+(* sets introduced via poly *)
+
+[%%template
+[@@@kind_set k = (base, value)]
+[@@@kind.default k = k]
+
+let id (x : (_ : k)) = x]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: shadowing variables from a different namespace is prohibited
+       attempting to bind
+         identifier 'k'
+         in namespace 'Kind'
+       but it is already bound
+         in namespace '(Set Kind)'
+         to the value 'base'
+         and when fully expanded '(bits64 bits32 word float64 float32 value)'
+|}]
+
+(* sets introduced via define *)
+
+[%%template
+[@@@kind_set.define k = (value, bits64)]
+[@@@kind.default k = k]
+
+let id (x : (_ : k)) = x]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: shadowing variables from a different namespace is prohibited
+       attempting to bind
+         identifier 'k'
+         in namespace 'Kind'
+       but it is already bound
+         in namespace '(Set Kind)'
+         to the value 'k'
+         and when fully expanded '(value bits64)'
+|}]
+
+(* works across template nodes *)
+
+[%%template
+[@@@mode m = (global, local)]
+
+[%%template
+[@@@mode.default m = (portable, nonportable)]
+
+let id (x @ m) = x]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: shadowing variables from a different namespace is prohibited
+       attempting to bind
+         identifier 'm'
+         in namespace '(Mode Portability)'
+       but it is already bound
+         in namespace '(Mode Locality)'
+         to the value 'global'
+         and when fully expanded '(global)'
+|}]
+
+(* identifiers that have left scope are not an issue *)
+
+[%%template
+[%%template
+[@@@mode.default m = (portable, nonportable)]
+
+let id (x @ m) = x]
+
+[@@@mode.default m = (global, local)]
+
+let id' (x @ m) = x]
+
+[%%expect {| |}]
+
+(* conflating modes and modalities in the same axis is allowed *)
+
+[%%template
+[@@@modality m = (portable, nonportable)]
+[@@@mode.default m = m]
+
+let id (x @ m) = x]
+
+[%%expect {| |}]
+
+(* test for the one tuple namespace that is supported *)
+
+[%%template [@@@modality heap_global = (portable, contended)]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: shadowing variables from a different namespace is prohibited
+       attempting to bind
+         identifier 'heap_global'
+         in namespace '(Modality Portability)'
+       but it is already bound
+         in namespace '(Tuple Alloc(Mode Locality))'
+         to the value '(Tuple heap global)'
+         and when fully expanded '((Tuple heap global))'
+|}]
+
+(* places where explicit sets are prohibited *)
+
+let%template f x = x [@kind value, bits64]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Type mismatch" (kind expression) (value (Comma_separated value
+       bits64))
+         ("expected type" Kind) ("expected sets" singleton)
+         (hint "unions not allowed in mono attributes")))
+|}]
+
+let%template f x = x [@kind_set value, bits64]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Type mismatch" (kind expression) (value (Comma_separated value
+       bits64))
+         ("expected type" Kind) ("expected sets" singleton)
+         (hint "unions not allowed in mono attributes")))
+|}]
+
+let%template f x = x [@@kind_set ks = (base, (base, immediate))]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Type mismatch" (kind expression) (value (Comma_separated base
+       immediate))
+         ("expected type" Kind) ("expected sets" singleton)
+         (hint
+           "unions (e.g. [k1 & (k2, k3)]) are not allowed in [[@@kind_set]]\
+          \ntry introducing a new name with [[@@@kind_set.define]] first")))
+|}]
+
+let%template f x = x [@@zero_alloc_if_local local, global]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Type mismatch" (kind expression) (value (Comma_separated local
+       global))
+         ("expected type" Mode) ("expected sets" singleton)
+         (hint "sets not allowed in [[@@zero_alloc_if]] attributes")))
+|}]
+
+let%template f x = x
+[@@mode (m, n) = (((nonportable, portable), uncontended), (portable, contended))]
+;;
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Type mismatch" (kind expression)
+         (value (Comma_separated nonportable portable)) ("expected type"
+       Mode)
+         ("expected sets" singleton) (hint "sets not allowed inside
+       tuples")))
+|}]
+
+(* Kind of unfortunate, but also I think sufficiently clearly "weird abuse" that we don't
+   need to handle this much better. *)
+
+[%%template
+[@@@kind_set.define value = bits64]
+
+let id (x : (_ : bits64)) = x
+let f (x : (_ : k)) = id x [@@kind k = value]]
+
+[%%expect {| |}]
+
+(* Also, the below has the correct behavior, and is the case that it would be more
+   upsetting if we got wrong. *)
+
+[%%template
+[@@@kind_set.define value = bits64]
+
+let f (x : (_ : value)) = Fn.id x]
+
+[%%expect {| |}]
+
+(* examples of banned uses of [[@with]] *)
+
+module type s = sig
+  type t
+end [@with: val x : int]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Invalid [@template.with] payload:
+       signature can only contain type, module, and module type bindings
+|}]
+
+module type s = sig
+  type t
+end
+[@with:
+  module M : sig
+    val x : int
+  end]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Invalid [@template.with] payload:
+       signature can only contain type, module, and module type bindings
+|}]
+
+module type s = sig
+  type t
+end [@with: module M (_ : sig end) : sig end]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Invalid [@template.with] payload:
+       only [module M : sig ... end] and [module M : S] allowed
+|}]
+
+module type s = sig
+  module M : sig end
+end [@with: module M = Sexp [@@hello]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Invalid [@template.with] payload:
+       non-doc attributes not allowed
+       hello
+|}]
+
+module type s = sig
+  module M : sig end
+end [@with: @@ portable module M = Sexp]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Invalid [@template.with] payload:
+       default modalities not allowed
+|}]
+
+module type s = sig
+  module M : sig
+    type t
+  end
+end
+[@with:
+  module (M @@ portable) : sig
+    type t = int
+  end]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Invalid [@template.with] payload:
+       modalities not allowed
+|}]
+
+module type s = sig
+  module M : sig
+    type t
+  end
+end
+[@with:
+  module _ : sig
+    type t = int
+  end]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Invalid [@template.with] payload:
+       anonymous modules not allowed
+|}]
+
+(* [default_if_multiple] with never-singleton list *)
+
+[%%template
+[@@@kind.default_if_multiple k = (value, bits64)]
+
+let id (x : (_ : k)) = x]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [default_if_multiple] with multiple expressions on the RHS not
+       allowed; use [default] instead
+|}]
+
+(* As it turns out, this [default_if_multiple] actually is sometimes a singleton, but the
+   fact that this is true is probably confusing and further evidence in favor of erroring
+*)
+
+[%%template
+[@@@kind_set ks = (value, base_non_value)]
+[@@@kind.default_if_multiple k = (value, ks)]
+
+let id (x : (_ : k)) = x]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [default_if_multiple] with multiple expressions on the RHS not
+       allowed; use [default] instead
 |}]

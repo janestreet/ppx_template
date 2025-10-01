@@ -1,6 +1,7 @@
 open! Stdppx
 open! Import
 open Language.Typed
+open Result.Let_syntax
 
 module Context = struct
   module Defaults = struct
@@ -28,25 +29,36 @@ module Maybe_hide_in_docs = struct
   let hide_in_docs t = t.hide_in_docs
 end
 
-let extract_bindings (type a) (ctx : a Attributes.Context.poly) node =
-  match Attributes.consume Attributes.poly ctx node with
-  | node, Ok bindings -> Ok (node, bindings)
-  | node, Error err ->
-    let loc, attrs =
-      match ctx with
-      | Value_binding -> node.pvb_loc, node.pvb_attributes
-      | Value_description -> node.pval_loc, node.pval_attributes
-      | Module_binding -> node.pmb_loc, node.pmb_attributes
-      | Module_declaration -> node.pmd_loc, node.pmd_attributes
-      | Type_declaration -> node.ptype_loc, node.ptype_attributes
-      | Module_type_declaration -> node.pmtd_loc, node.pmtd_attributes
-      | Include_infos -> node.pincl_loc, node.pincl_attributes
-    in
-    Error (loc, err, attrs)
+let extract_loc (type a) (ctx : a Attributes.Context.poly) (node : a) =
+  match ctx with
+  | Value_binding -> node.pvb_loc
+  | Value_description -> node.pval_loc
+  | Module_binding -> node.pmb_loc
+  | Module_declaration -> node.pmd_loc
+  | Type_declaration -> node.ptype_loc
+  | Module_type_declaration -> node.pmtd_loc
+  | Include_infos -> node.pincl_loc
 ;;
 
-let extract_floating_bindings (type a) (ctx : a Attributes.Floating.Context.poly) item =
-  match Attributes.Floating.convert_poly ctx item with
+let extract_attrs (type a) (ctx : a Attributes.Context.poly) (node : a) =
+  match ctx with
+  | Value_binding -> node.pvb_attributes
+  | Value_description -> node.pval_attributes
+  | Module_binding -> node.pmb_attributes
+  | Module_declaration -> node.pmd_attributes
+  | Type_declaration -> node.ptype_attributes
+  | Module_type_declaration -> node.pmtd_attributes
+  | Include_infos -> node.pincl_attributes
+;;
+
+let extract_bindings (type a) (ctx : a Attributes.Context.poly) node =
+  match Attributes.consume Attributes.poly ctx node with
+  | Ok (node, bindings) -> Ok (node, bindings)
+  | Error err -> Error (extract_loc ctx node, err, extract_attrs ctx node)
+;;
+
+let extract_floating (type a) (ctx : a Attributes.Floating.Context.poly) item =
+  match Attributes.Floating.convert ctx item with
   | Ok _ as ok -> ok
   | Error err ->
     let loc =
@@ -67,14 +79,21 @@ let stable_dedup list ~compare =
 let handle_one_binding
   ~original_env
   envs
-  (explicitness, Attributes.Poly.Binding { pattern; expressions; mangle; mangle_axis })
+  ( explicitness
+  , Attributes.Poly.Binding
+      { binding = { pattern; expression; lookup }; mangle; mangle_axis } )
   =
-  List.concat_map envs ~f:(fun (env, manglers) ->
-    List.map expressions ~f:(fun expr -> Env.eval original_env expr)
+  envs
+  >>| List.map ~f:(fun (env, manglers) ->
+    expression
+    |> Env.eval original_env lookup
     (* If multiple expressions evaluate to the same value, only generate one instance. *)
-    |> stable_dedup ~compare:Value.compare
-    |> List.map ~f:(fun value ->
-      let env = Env.bind env pattern value in
+    >>| Nonempty_list.to_list
+    >>| stable_dedup ~compare:Value.compare
+    >>| List.map ~f:(fun value ->
+      let+ env =
+        Env.bind env ~loc:expression.loc ~is_set:(Axis.is_set mangle_axis) pattern value
+      in
       let mangle_value = Value.Basic.P (mangle value) in
       let manglers =
         Axis.Map.update
@@ -86,7 +105,10 @@ let handle_one_binding
               Some (explicitness, mangle_value :: values))
           manglers
       in
-      env, manglers))
+      env, manglers)
+    >>= Result.all)
+  >>= Result.all
+  >>| List.concat
 ;;
 
 let handle_one_attribute
@@ -98,7 +120,8 @@ let handle_one_attribute
      putting an empty [[@@kind]] attribute disables the default kind mangling from
      [[@@@kind.default]]. *)
   let init =
-    List.map envs ~f:(fun (env, manglers) ->
+    envs
+    >>| List.map ~f:(fun (env, manglers) ->
       ( env
       , Axis.Map.add
           (P mangle_axis)
@@ -115,10 +138,11 @@ let instantiate poly_attributes ~env:(original_env : Env.t) =
   let envs =
     List.fold_left
       poly_attributes
-      ~init:[ original_env, Context.Defaults.empty ]
+      ~init:(Ok [ original_env, Context.Defaults.empty ])
       ~f:(handle_one_attribute ~original_env)
   in
-  List.map envs ~f:(fun (env, manglers) ->
+  envs
+  >>| List.map ~f:(fun (env, manglers) ->
     (* Manglers were added in reverse order *)
     env, Axis.Map.map (Maybe_explicit.map ~f:List.rev) manglers)
 ;;
@@ -134,23 +158,26 @@ let consume_poly
     match extract_bindings attr_ctx node with
     | Error _ as err -> err
     | Ok (node, polys) ->
-      let instances =
-        List.map (instantiate polys ~env) ~f:(fun (env, manglers) ->
-          (* Use current default manglers when axis is unspecified. *)
-          let manglers =
-            Axis.Map.merge
-              (fun _ defaults manglers ->
-                match defaults, manglers with
-                | None, None -> None
-                | _, Some _ -> manglers
-                | Some _, None -> defaults)
-              defaults
-              manglers
-          in
-          (* Associate node with the instance *)
-          node, env, manglers)
-      in
-      Ok instances)
+      (match instantiate polys ~env with
+       | Error sexp -> Error (extract_loc attr_ctx node, sexp, extract_attrs attr_ctx node)
+       | Ok list ->
+         let instances =
+           List.map list ~f:(fun (env, manglers) ->
+             (* Use current default manglers when axis is unspecified. *)
+             let manglers =
+               Axis.Map.merge
+                 (fun _ defaults manglers ->
+                   match defaults, manglers with
+                   | None, None -> None
+                   | _, Some _ -> manglers
+                   | Some _, None -> defaults)
+                 defaults
+                 manglers
+             in
+             (* Associate node with the instance *)
+             node, env, manglers)
+         in
+         Ok instances))
   |> List.fold_right ~init:(Ok []) ~f:(fun head tail ->
     match head, tail with
     | Ok head, Ok tail -> Ok (head :: tail)
@@ -176,9 +203,9 @@ let consume_poly
     in
     let err =
       match errs with
-      | _ :: _ :: _ -> Sexp.message "multiple errors" [ "", List errs ]
+      | err :: (_ :: _ as errs) -> Syntax_error.combine err errs
       | [ err ] -> err
-      | [] -> Atom "empty error list"
+      | [] -> Syntax_error.createf ~loc "empty error list"
     in
     let attrs = List.concat attrs in
     Error (loc, err, attrs)
@@ -224,67 +251,87 @@ let deduplicate_deriving_attrs tds =
     })
 ;;
 
-let is_local (mode : Type.mode Expression.t Loc.t) ~env =
-  let (Identifier ident) = Env.eval env mode in
-  match ident.ident with
-  | "local" -> true
-  | "global" -> false
-  | ident ->
-    Location.raise_errorf ~loc:mode.loc "Unknown or invalid mode identifier: %s" ident
+let is_local (mode : (Type.mode, Expression.singleton) Expression.t Loc.t) ~env =
+  let loc = mode.loc in
+  Result.bind (Env.eval_singleton env mode) ~f:(fun (Identifier ident) ->
+    match ident.ident with
+    | "local" -> Ok true
+    | "global" -> Ok false
+    | mode ->
+      Error (Syntax_error.createf ~loc "Unknown or invalid mode identifier: %s" mode))
 ;;
 
-let is_stack (alloc : Type.alloc Expression.t Loc.t) ~env =
-  let (Identifier ident) = Env.eval env alloc in
-  match ident.ident with
-  | "stack" -> true
-  | "heap" -> false
-  | ident ->
-    Location.raise_errorf ~loc:alloc.loc "Unbound allocation identifier: %s" ident
+let is_stack (alloc : (Type.alloc, Expression.singleton) Expression.t Loc.t) ~env =
+  let loc = alloc.loc in
+  Result.bind (Env.eval_singleton env alloc) ~f:(fun (Identifier ident) ->
+    match ident.ident with
+    | "stack" -> Ok true
+    | "heap" -> Ok false
+    | alloc -> Error (Syntax_error.createf ~loc "Unbound alloc identifier: %s" alloc))
 ;;
 
 let should_wrap_with_exclave expr ~exclave_because_stack ~exclave_because_local ~env =
-  match exclave_because_stack, exclave_because_local with
-  | Some alloc, _ when is_stack alloc ~env -> Ok true
-  | _, Some mode ->
-    let rec is_ident_or_field_or_constant = function
-      | { pexp_desc = Pexp_ident _ | Pexp_constant _ | Pexp_construct (_, None); _ } ->
-        true
-      | { pexp_desc = Pexp_field (expr, _); _ } -> is_ident_or_field_or_constant expr
-      | _ -> false
-    in
-    let rec is_pure_allocation ({ pexp_desc; pexp_loc; _ } as expr) =
-      match Ppxlib_jane.Shim.Expression_desc.of_parsetree pexp_desc ~loc:pexp_loc with
-      | Pexp_tuple labeled_exprs ->
-        List.for_all ~f:(fun (_, expr) -> is_pure_allocation expr) labeled_exprs
-      | Pexp_construct (_, None) | Pexp_variant (_, None) -> true
-      | Pexp_construct (_, Some expr) | Pexp_variant (_, Some expr) ->
-        is_pure_allocation expr
-      | Pexp_record (fields, expr) ->
-        List.for_all ~f:(fun (_, e) -> is_pure_allocation e) fields
-        &&
-          (match expr with
-          | None -> true
-          | Some expr -> is_pure_allocation expr)
-      | Pexp_array (_mut, exprs) -> List.for_all ~f:is_pure_allocation exprs
-      | _ -> is_ident_or_field_or_constant expr
-    in
-    let is_allowable =
-      match expr.pexp_desc with
-      | Pexp_apply (f, args) ->
-        is_ident_or_field_or_constant f
-        && List.for_all ~f:(fun (_, e) -> is_ident_or_field_or_constant e) args
-      | _ -> is_pure_allocation expr
-    in
-    if is_allowable
-    then Ok (is_local mode ~env)
-    else
-      Error
-        ((* Ideally this check is conservative, which seems fine for now. *)
-         Sexp.Atom
-           "exclave_if_local is only allowed on tailcalls or syntactic allocations (e.g. \
-            tuples) consisting entirely of identifiers, record fields, and/or constants"
-         |> Error.to_extension_node Expression expr)
-  | _, _ -> Ok false
+  let stack_result =
+    match exclave_because_stack with
+    | None -> None
+    | Some alloc ->
+      (match is_stack alloc ~env with
+       | (Ok true | Error _) as result ->
+         Some
+           (Result.map_error
+              result
+              ~f:(Syntax_error_conversion.to_extension_node Expression expr))
+       | Ok false -> None)
+  in
+  match stack_result with
+  | Some result -> result
+  | None ->
+    (match exclave_because_local with
+     | Some mode ->
+       let rec is_ident_or_field_or_constant = function
+         | { pexp_desc = Pexp_ident _ | Pexp_constant _ | Pexp_construct (_, None); _ } ->
+           true
+         | { pexp_desc = Pexp_field (expr, _); _ } -> is_ident_or_field_or_constant expr
+         | _ -> false
+       in
+       let rec is_pure_allocation ({ pexp_desc; pexp_loc; _ } as expr) =
+         match Ppxlib_jane.Shim.Expression_desc.of_parsetree pexp_desc ~loc:pexp_loc with
+         | Pexp_tuple labeled_exprs ->
+           List.for_all ~f:(fun (_, expr) -> is_pure_allocation expr) labeled_exprs
+         | Pexp_construct (_, None) | Pexp_variant (_, None) -> true
+         | Pexp_construct (_, Some expr) | Pexp_variant (_, Some expr) ->
+           is_pure_allocation expr
+         | Pexp_record (fields, expr) ->
+           List.for_all ~f:(fun (_, e) -> is_pure_allocation e) fields
+           &&
+             (match expr with
+             | None -> true
+             | Some expr -> is_pure_allocation expr)
+         | Pexp_array (_mut, exprs) -> List.for_all ~f:is_pure_allocation exprs
+         | _ -> is_ident_or_field_or_constant expr
+       in
+       let is_allowable =
+         match expr.pexp_desc with
+         | Pexp_apply (f, args) ->
+           is_ident_or_field_or_constant f
+           && List.for_all ~f:(fun (_, e) -> is_ident_or_field_or_constant e) args
+         | _ -> is_pure_allocation expr
+       in
+       if is_allowable
+       then
+         is_local mode ~env
+         |> Result.map_error
+              ~f:(Syntax_error_conversion.to_extension_node Expression expr)
+       else
+         Error
+           ((* Ideally this check is conservative, which seems fine for now. *)
+            Syntax_error.createf
+              ~loc:expr.pexp_loc
+              "[%%template]: exclave_if_local is only allowed on tailcalls or syntactic \
+               allocations (e.g. tuples) consisting entirely of identifiers, record \
+               fields, and/or constants"
+            |> Syntax_error_conversion.to_extension_node Expression expr)
+     | None -> Ok false)
 ;;
 
 let consume_zero_alloc_if
@@ -293,18 +340,34 @@ let consume_zero_alloc_if
   (node : a)
   ~env
   =
-  let open Result.Let_syntax in
   let* node, zero_alloc_if_local =
-    Attributes.consume_result Attributes.zero_alloc_if_local ctx node
+    Attributes.consume Attributes.zero_alloc_if_local ctx node
   in
-  let+ node, zero_alloc_if_stack =
-    Attributes.consume_result Attributes.zero_alloc_if_stack ctx node
+  let* node, zero_alloc_if_stack =
+    Attributes.consume Attributes.zero_alloc_if_stack ctx node
+  in
+  let* add_zero_alloc_if_local =
+    match zero_alloc_if_local with
+    | None -> Ok None
+    | Some (loc, mode, payload) ->
+      (match is_local mode ~env with
+       | Ok true -> Ok (Some (loc, payload))
+       | Ok false -> Ok None
+       | Error _ as err -> err)
+  in
+  let+ add_zero_alloc_if_stack =
+    match zero_alloc_if_stack with
+    | None -> Ok None
+    | Some (loc, alloc, payload) ->
+      (match is_stack alloc ~env with
+       | Ok true -> Ok (Some (loc, payload))
+       | Ok false -> Ok None
+       | Error _ as err -> err)
   in
   let add_zero_alloc =
-    match zero_alloc_if_local, zero_alloc_if_stack with
-    | Some (loc, mode, payload), _ when is_local mode ~env -> Some (loc, payload)
-    | _, Some (loc, alloc, payload) when is_stack alloc ~env -> Some (loc, payload)
-    | _, _ -> None
+    match add_zero_alloc_if_local, add_zero_alloc_if_stack with
+    | (Some _ as some), _ | _, (Some _ as some) -> some
+    | None, None -> None
   in
   match add_zero_alloc with
   | None -> node
@@ -407,9 +470,8 @@ let t ~mk_struct ~mk_sig =
         (* We can't define a single [visit] function as in [visit_poly] because we need to
            call the superclass method, or else we loop infinitely, and [super] can't be
            passed around as a value (it can only be used directly with a method call). *)
-        let node, mangle_exprs = Attributes.consume Attributes.mono attr_ctx node in
-        match mangle_exprs with
-        | Ok mangle_exprs ->
+        match Attributes.consume Attributes.mono attr_ctx node with
+        | Ok (node, mangle_exprs) ->
           let node = Mangle.mangle attr_ctx node mangle_exprs ~env:ctx.env in
           (match attr_ctx with
            | Expression -> super#expression ctx node
@@ -417,24 +479,37 @@ let t ~mk_struct ~mk_sig =
            | Core_type -> super#core_type ctx node
            | Module_type -> super#module_type ctx node)
         | Error error ->
-          Error.to_extension_node (Attributes.Context.mono_to_any attr_ctx) node error
+          Syntax_error_conversion.to_extension_node
+            (Attributes.Context.mono_to_any attr_ctx)
+            node
+            error
 
     method! module_expr = self#visit_mono Module_expr
     method! core_type = self#visit_mono Core_type
-    method! module_type = self#visit_mono Module_type
+
+    method! module_type ctx mty =
+      let mty = self#visit_mono Module_type ctx mty in
+      let mty_res =
+        let* mty, with_ = Attributes.consume Attributes.with_ Module_type mty in
+        match with_ with
+        | Some with_ ->
+          let with_ = self#signature ctx with_ in
+          With_constraint.convert mty with_
+        | None -> Ok mty
+      in
+      match mty_res with
+      | Ok mty -> mty
+      | Error err -> Syntax_error_conversion.to_extension_node Module_type mty err
 
     method! expression ctx expr =
-      let open Result.Let_syntax in
       let loc = { expr.pexp_loc with loc_ghost = true } in
       let expr_res =
-        let expr, exclave_because_stack =
+        let* expr, exclave_because_stack =
           Attributes.consume Attributes.exclave_if_stack Expression expr
         in
-        let* exclave_because_stack = exclave_because_stack in
-        let expr, exclave_because_local =
+        let* expr, exclave_because_local =
           Attributes.consume Attributes.exclave_if_local Expression expr
         in
-        let* exclave_because_local = exclave_because_local in
         let expr =
           match
             should_wrap_with_exclave
@@ -451,17 +526,17 @@ let t ~mk_struct ~mk_sig =
       in
       match expr_res with
       | Ok expr -> self#visit_mono Expression ctx expr
-      | Error err -> Error.to_extension_node Expression expr err
+      | Error err -> Syntax_error_conversion.to_extension_node Expression expr err
 
     method! value_binding ctx vb =
       match consume_zero_alloc_if Value_binding vb ~env:ctx.env with
       | Ok vb -> super#value_binding ctx vb
-      | Error err -> Error.to_extension_node Value_binding vb err
+      | Error err -> Syntax_error_conversion.to_extension_node Value_binding vb err
 
     method! value_description ctx vd =
       match consume_zero_alloc_if Value_description vd ~env:ctx.env with
       | Ok vd -> super#value_description ctx vd
-      | Error err -> Error.to_extension_node Value_description vd err
+      | Error err -> Syntax_error_conversion.to_extension_node Value_description vd err
 
     (* The [@@kind] attribute can appear on various nodes that define or declare values,
        modules, or types. For each such node, we determine what layout mappings are being
@@ -516,7 +591,7 @@ let t ~mk_struct ~mk_sig =
              { node; hide_in_docs = Mangle.Result.did_mangle res })
          | Error (_, err, _) ->
            [ { node =
-                 Error.to_extension_node
+                 Syntax_error_conversion.to_extension_node
                    (Attributes.Context.poly_to_any attr_ctx)
                    (List.hd nodes)
                    err
@@ -569,51 +644,81 @@ let t ~mk_struct ~mk_sig =
                    , { pstr_desc = Pstr_attribute _; pstr_loc = attr_loc; _ } )
                  | ( Signature_item
                    , { psig_desc = Psig_attribute _; psig_loc = attr_loc; _ } ) ->
-                   (match extract_floating_bindings attr_ctx item with
+                   (match extract_floating attr_ctx item with
                     | Ok None -> visit ctx item :: loop ctx items
-                    | Ok (Some (explicitness, { bindings; default })) ->
-                      let instances =
-                        instantiate [ explicitness, bindings ] ~env:ctx.env
+                    | Ok (Some (Define (Define bindings))) ->
+                      let loc = Attributes.Floating.Context.location attr_ctx item in
+                      let original_env = ctx.env in
+                      let new_env =
+                        List.fold_left
+                          bindings
+                          ~init:(Ok original_env)
+                          ~f:(fun env ({ pattern; expression; lookup } : _ Binding.t) ->
+                            let* env = env in
+                            let (Identifier ident) = pattern in
+                            let* set_value = Env.eval original_env lookup expression in
+                            Env.bind_set env ~loc ident set_value)
                       in
-                      List.mapi instances ~f:(fun i (env, manglers) ->
-                        let defaults =
-                          match default with
-                          | false -> ctx.defaults
-                          | true ->
-                            Axis.Map.merge
-                              (fun _ ctx_defaults new_defaults ->
-                                match ctx_defaults, new_defaults with
-                                | None, None -> None
-                                | Some defaults, None | None, Some defaults ->
-                                  Some defaults
-                                | ( Some (_old_explicitness, ctx_defaults)
-                                  , Some new_defaults ) ->
-                                  Some
-                                    (* Always use the explicit flag from the new
+                      (match new_env with
+                       | Ok env -> loop { ctx with env } items
+                       | Error err ->
+                         Syntax_error_conversion.to_extension_node_floating
+                           attr_ctx
+                           ~loc
+                           err
+                         :: loop ctx items)
+                    | Ok (Some (Poly (explicitness, { bindings; kind }))) ->
+                      (match instantiate [ explicitness, bindings ] ~env:ctx.env with
+                       | Ok instances ->
+                         let is_many = List.length instances > 1 in
+                         List.mapi instances ~f:(fun i (env, manglers) ->
+                           let defaults =
+                             match kind with
+                             | Never_add_mangler -> ctx.defaults
+                             | Add_mangler_if_more_than_one_elt when not is_many ->
+                               ctx.defaults
+                             | Always_add_mangler | Add_mangler_if_more_than_one_elt ->
+                               Axis.Map.merge
+                                 (fun _ ctx_defaults new_defaults ->
+                                   match ctx_defaults, new_defaults with
+                                   | None, None -> None
+                                   | Some defaults, None | None, Some defaults ->
+                                     Some defaults
+                                   | ( Some (_old_explicitness, ctx_defaults)
+                                     , Some new_defaults ) ->
+                                     Some
+                                       (* Always use the explicit flag from the new
                                        attribute. *)
-                                    (Maybe_explicit.map
-                                       new_defaults
-                                       ~f:(fun new_defaults ->
-                                         ctx_defaults @ new_defaults)))
-                              ctx.defaults
-                              manglers
-                        in
-                        let ctx : Context.t =
-                          { ghostify = ctx.ghostify || i > 0; env; defaults }
-                        in
-                        (* The location of the include statement spans from the start of
-                           the attribute to the end of the last item in [items]. This
-                           ensures that the locations of every item is well-nested, which
-                           helps Merlin. *)
-                        wrap_include
-                          ~loc:
-                            { loc_start = attr_loc.loc_start
-                            ; loc_end = last_item_loc.loc_end
-                            ; loc_ghost = true
-                            }
-                          (loop ctx items))
+                                       (Maybe_explicit.map
+                                          new_defaults
+                                          ~f:(fun new_defaults ->
+                                            ctx_defaults @ new_defaults)))
+                                 ctx.defaults
+                                 manglers
+                           in
+                           let ctx : Context.t =
+                             { ghostify = ctx.ghostify || i > 0; env; defaults }
+                           in
+                           (* The location of the include statement spans from the start of
+                              the attribute to the end of the last item in [items]. This
+                              ensures that the locations of every item is well-nested, which
+                              helps Merlin. *)
+                           wrap_include
+                             ~loc:
+                               { loc_start = attr_loc.loc_start
+                               ; loc_end = last_item_loc.loc_end
+                               ; loc_ghost = true
+                               }
+                             (loop ctx items))
+                       | Error err ->
+                         Syntax_error_conversion.to_extension_node_floating
+                           attr_ctx
+                           ~loc:attr_loc
+                           err
+                         :: loop ctx items)
                     | Error (loc, err) ->
-                      Error.to_extension_node_floating attr_ctx ~loc err :: loop ctx items)
+                      Syntax_error_conversion.to_extension_node_floating attr_ctx ~loc err
+                      :: loop ctx items)
                  | _ -> visit ctx item :: loop ctx items)
             in
             loop ctx nodes
@@ -718,8 +823,8 @@ let t ~mk_struct ~mk_sig =
           items
           |> List.concat_map ~f:(fun { Maybe_hide_in_docs.node = desc; hide_in_docs } ->
             let sig_ = [ f ~loc desc ] in
-            if hide_in_docs then Ppx_helpers.hide_from_docs ~loc sig_ else sig_)
-          |> Ppx_helpers.simplify_doc_toggling
+            if hide_in_docs then Ppx_helpers.Docs.hide ~loc sig_ else sig_)
+          |> Ppx_helpers.Docs.simplify
           |> function
           | [ { psig_desc; psig_loc = _ } ] -> psig_desc
           | sigis -> mk_sig ~loc sigis)
@@ -737,7 +842,7 @@ let t ~mk_struct ~mk_sig =
           let loc = { loc with loc_ghost = true } in
           if all_hidden
           then
-            Ppx_helpers.hide_from_docs ~loc [ { psig_desc = sigi; psig_loc = loc } ]
+            Ppx_helpers.Docs.hide ~loc [ { psig_desc = sigi; psig_loc = loc } ]
             |> mk_sig ~loc
           else sigi)
       in

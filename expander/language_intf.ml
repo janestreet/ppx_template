@@ -9,18 +9,35 @@ open! Import
     maps identifiers ([Identifier.t]) to values ([Value.t]). Each identifier and value is
     associated with a type ([Type.t]) and identifiers are namespaced by their type.
 
-    The environment is updated by poly-attributes. A poly-attribute is either floating (in
-    which case it updates the environment for all subsequent items in the current
-    structure/signature) or is attached to an item (in which case it updates the
-    environment for the item it is directly attached to).
+    The environment is updated by two types of attributes:
 
-    A poly-attribute consists of a list of bindings; if there are multiple
-    poly-attributes, the lists of bindings can conceptually be concatenated to form a
-    single list of bindings. Bindings are evaluated sequentially. An individual binding
-    maps a pattern ([Pattern.t]) to a list of expressions ([Expression.t]). Evaluation is
-    split into a branch for each expression. The expression is evaluated under the current
-    environment, and is combined with the pattern to form new (identifier x expression)
-    entries which are added to the environment for the branch.
+    1. poly-attributes; a poly-attribute is either:
+       a. floating (in which case it updates the environment for all subsequent items in
+          the current structure/signature), e.g. [[@@@kind k = bits64]] or
+       b. attached to an item (in which case it updates the environment for the item it is
+          directly attached to), e.g. [[@@kind k = bits64]]
+
+    2. define-attributes; a define attribute is always floating attribute, and is used to
+       bind a set in the namespace [[@@@kind_set.define ks = (value, bits64)]]
+
+    Poly-attributes and define-attributes both consist of a list of bindings; if there are
+    multiple such attributes, the lists of bindings can conceptually be concatenated to
+    form a single list of bindings. Bindings are evaluated sequentially. An individual
+    binding maps a pattern ([Pattern.t]) to a single expression ([Expression.t]). For a
+    pattern of type ['a], the associated expression evaluates to a set of values
+    ([Value.t]) of type ['a].
+    - For a poly-attribute, evaluation is split into a branch for each value in the set.
+      The value is combined with the pattern to form new (identifier x expression) entries
+      which are added to the environment for the branch.
+    - For a define-attribute, no branching occurs; rather, the whole set is bound to the
+      name in the environment.
+
+    Note the distinction between:
+    - [[@@@kind_set ks = (value, bits64)]], which is a poly-attribute that causes the
+      following code to be templated with the two singleton sets [ks = value] and
+      [ks = bits64] and
+    - [[@@@kind_set.define ks = (value, bits64)]], which is a define-attribute and binds
+      the name [ks] to the set [value, bits64] once.
 
     The environment is used to update the OCaml AST in two ways:
 
@@ -33,55 +50,7 @@ open! Import
        [[@alloc]] attribute attached to an identifier), its payload (a list of
        expressions) is evaluated in the current environment, and is used to mangle the
        attached identifier. If there are multiple mono-attributes, the lists of
-       expressions are concatenated.
-
-    Below, we define a grammar for the payloads of [ppx_template] attributes and how they
-    correspond to the types in the [ppx_template] DSL.
-
-    Helper grammars:
-    {v
-    tuple<x> ::=
-    | "(" x ("," x)+ ")"
-    | "(" x "@" x ")"
-
-    identifier ::= (valid ocaml variable identifier)
-    v}
-
-    Grammar of poly-attribute payloads:
-    {v
-    # e.g. let f x = x [@@kind k1 = bits32, k2 = (value, bits32)] [@@mode local local]
-    poly ::= simple-bindings | punned-bindings
-
-    simple-bindings ::= nil | simple-binding ("," simple-binding)*
-
-    simple-binding ::= pattern "=" expressions
-
-    punned-bindings ::= expression*
-    v}
-
-    Grammar of mono-attribute payloads:
-    {v
-    # e.g. let x = (f [@kind value bits32])
-    mono ::= expression*
-    v}
-
-    Patterns:
-    {v
-    pattern ::=
-    | identifier
-    | tuple<identifier>
-    v}
-
-    Expressions:
-    {v
-    expressions ::= expression | "(" expression ("," expression)+ ")"
-
-    expression ::=
-    | identifier
-    | expression ("&" expression)+
-    | expression "mod" expression+
-    | tuple<expression>
-    v} *)
+       expressions are concatenated. *)
 
 module Definitions = struct
   module Untyped = struct
@@ -91,6 +60,7 @@ module Definitions = struct
         | Mode
         | Modality
         | Alloc
+        | Set of t
     end
 
     module Identifier = struct
@@ -100,23 +70,23 @@ module Definitions = struct
     module Expression = struct
       type t =
         | Identifier of Identifier.t
-        | Kind_product of t list
-        | Kind_mod of t * t list
-        | Tuple of t list
+        | Kind_product of t Nonempty_list.t
+        | Kind_mod of t * t Nonempty_list.t
+        | Comma_separated of t Nonempty_list.t
     end
 
     module Value = struct
       type t =
         | Identifier of Identifier.t
-        | Kind_product of t list
-        | Kind_mod of t * t list
-        | Tuple of t list
+        | Kind_product of t Nonempty_list.t
+        | Kind_mod of t * t Nonempty_list.t
+        | Tuple of t Nonempty_list.t
     end
 
     module Pattern = struct
       type t =
         | Identifier of Identifier.t
-        | Tuple of t list
+        | Tuple of t Nonempty_list.t
     end
   end
 
@@ -143,7 +113,7 @@ module Definitions = struct
 
       type _ t =
         | Basic : 'a basic -> 'a basic t
-        | Tuple : 'a tuple -> 'a t
+        | Tuple : ('a * 'b) tuple -> ('a * 'b) t (*_ Tuples have at least one element *)
 
       and _ tuple =
         | [] : unit tuple
@@ -162,6 +132,7 @@ module Definitions = struct
         | Mode : Type.mode_ Type.basic t
         | Modality : Type.modality_ Type.basic t
         | Alloc : Type.alloc_ Type.basic t
+        | Set : 'a t -> 'a t
 
       type packed = P : _ t -> packed
 
@@ -200,6 +171,17 @@ module Definitions = struct
 
         type packed = P : _ t -> packed
       end
+
+      module Namespace = struct
+        type _ t =
+          | One_axis : 'a Sub_axis.t -> 'a t
+          | Set : 'a Sub_axis.t -> 'a t
+          | Tuple : ('a * 'b) tuple -> ('a * 'b) t (*_ Tuples have at least one element *)
+
+        and _ tuple =
+          | [] : unit tuple
+          | ( :: ) : 'a t * 'b tuple -> ('a * 'b) tuple
+      end
     end
 
     module Identifier = struct
@@ -210,29 +192,54 @@ module Definitions = struct
     end
 
     module Expression = struct
-      type 'a t =
-        | Identifier : 'a Identifier.t -> 'a t
-        | Kind_product : Type.kind t list -> Type.kind t
-        | Kind_mod : Type.kind t * Type.modality t list -> Type.kind t
-        | Tuple : 'a tuple -> 'a t
+      (** Expressions that recursively do not contain any syntactic unions, e.g.
+          [k mod m], [base_with_imm], and [heap @ global]. These expressions can still be
+          interpreted as sets when identifiers bound to sets are expanded. *)
+      type singleton = private Singleton
 
-      and _ tuple =
+      (** Expressions that might contain a syntactic union, such as any singleton, and
+          also expressions like [(k1, k2) & k3]. *)
+      type set = private Set
+
+      type ('err, 'is_set) is_set =
+        | Singleton : 'err -> ('err, singleton) is_set
+        (** Error hint for expressions that contain illegal unions *)
+        | Set : (_, set) is_set
+
+      (** ['a] is the type of [Value]s to which an [Expression] evaluates. ['s] is whether
+          the expression is allowed to syntactically contain sets (corresponding to the
+          [Union] constructor). If an [('a, singleton) t] is evaluated without expanding
+          identifiers bound to sets, the result is just one ['a Value.t]. If a
+          [('a, set) t] is evaluated, or when any [('a, _) t] is evaluated by expanding
+          identifiers bound to sets, the result of evaluation is a list of ['a Value.t]s. *)
+      type ('a, 's) t =
+        | Identifier : 'a Identifier.t -> ('a, _) t
+        | Kind_product : (Type.kind, 's) t Nonempty_list.t -> (Type.kind, 's) t
+        | Kind_mod :
+            (Type.kind, 's) t * (Type.modality, singleton) t Nonempty_list.t
+            -> (Type.kind, 's) t
+        | Tuple :
+            ('a * 'b) tuple
+            -> ('a * 'b, _) t (*_ Tuples have at least one element *)
+        | Union : ('a, _) t Nonempty_list.t -> ('a, set) t
+
+      and 'a tuple =
         | [] : unit tuple
-        | ( :: ) : 'a t * 'b tuple -> ('a * 'b) tuple
+        | ( :: ) : ('a, singleton) t * 'b tuple -> ('a * 'b) tuple
 
-      type packed = P : 'a t -> packed [@@unboxed]
+      type packed = P : ('a, 's) t -> packed [@@unboxed]
 
       module Basic = struct
-        type packed = P : 'a Type.basic t -> packed [@@unboxed]
+        type packed = P : ('a Type.basic, singleton) t -> packed [@@unboxed]
       end
     end
 
     module Value = struct
       type 'a t =
         | Identifier : 'a Type.basic Identifier.t -> 'a Type.basic t
-        | Kind_product : Type.kind t list -> Type.kind t
-        | Kind_mod : Type.kind t * Type.modality t list -> Type.kind t
-        | Tuple : 'a tuple -> 'a t
+        | Kind_product : Type.kind t Nonempty_list.t -> Type.kind t
+        | Kind_mod : Type.kind t * Type.modality t Nonempty_list.t -> Type.kind t
+        | Tuple : ('a * 'b) tuple -> ('a * 'b) t (*_ Tuples have at least one element *)
 
       and _ tuple =
         | [] : unit tuple
@@ -248,7 +255,7 @@ module Definitions = struct
     module Pattern = struct
       type 'a t =
         | Identifier : 'a Identifier.t -> 'a t
-        | Tuple : 'a tuple -> 'a t
+        | Tuple : ('a * 'b) tuple -> ('a * 'b) t (*_ Tuples have at least one element *)
 
       and _ tuple =
         | [] : unit tuple
@@ -260,17 +267,45 @@ module Definitions = struct
           front of the association list, and looked up from front to back, so newer
           entries shadow older ones. *)
 
+      type lookup =
+        | Preserve_atoms
+        (** When evaluating, do not expand identifiers into the set they represent. This
+            form of lookup is used when evaluating set mono and poly attributes for the
+            purposes of mangling, because we mangle by _names_ of sets, not canonical
+            representations of their contents. *)
+        | Expand_atoms_bound_to_sets
+        (** When evaluating, fully expand all identifiers. This form of lookup is used
+            when evaluating the right hand side of a non-set binding, since here we wish
+            to bind the pattern on the left against all values in the set on the right *)
+
       module Entry = struct
-        type t = Entry : 'a Identifier.t * 'a Value.t -> t
+        type 'a entry =
+          { ident : 'a Identifier.t
+          ; preserve_atoms : 'a Value.t
+          (** A non-union-containing "alias" of this name. e.g. in
+              [[@kind_set ks = value_with_imm]], the ident [value_with_imm] *)
+          ; expand_atoms_bound_to_sets : 'a Value.t Nonempty_list.t
+          (** The full set. e.g. in [[@kind_set ks = value_with_imm]], the list of idents
+              [value], [immediate], [immediate64]. For names that are not obviously bound
+              to sets, this is just the singleton set containing [preserve_atoms] *)
+          ; namespace : 'a Axis.Namespace.t
+          }
+
+        type t = Entry : _ entry -> t
       end
 
       type t = Entry.t list
     end
 
     module Binding = struct
-      type ('a, 'mangle) t =
+      type 'a t =
         { pattern : 'a Pattern.t
-        ; expressions : 'a Expression.t Loc.t list
+        ; expression : ('a, Expression.set) Expression.t Loc.t
+        ; lookup : Env.lookup
+        }
+
+      type ('a, 'mangle) with_mangle =
+        { binding : 'a t
         ; mangle : 'a Value.t -> 'mangle Value.t
         (** When an item [let lhs = rhs [@@attr pat = (expr1, expr2)]] is evaluated e.g.
             on [expr1], the expression gets evaluated to a [Value.t], which is then passed
@@ -298,6 +333,8 @@ module Definitions = struct
           ; sexp_of_kind : 'value -> Sexp.t
           ; value : 'value
           ; expected_type : _ Typed.Type.t
+          ; expected_sets : (string, _) Typed.Expression.is_set option
+          ; hint : string option
           }
           -> t
       | Tuple_length_mismatch :
@@ -332,6 +369,9 @@ module type Language = sig
       include module type of struct
         include Identifier
       end
+
+      val compare : t -> t -> int
+      val sexp_of_t : t -> Sexp.t
     end
 
     module Expression : sig
@@ -394,6 +434,7 @@ module type Language = sig
       module Map : Map.S with type key := packed
 
       val of_type : 'a Type.basic Type.t -> 'a Type.basic t
+      val is_set : 'a t -> bool
 
       module Sub_axis : sig
         include module type of struct
@@ -418,10 +459,24 @@ module type Language = sig
           end
         end
 
+        module Or_unrecognized : sig
+          include module type of struct
+            include Or_unrecognized
+          end
+        end
+
         module Map : Stdlib.Map.S with type key := packed
 
         val of_identifier : 'a Type.basic Identifier.t -> 'a Type.basic t
         val of_value : 'a Type.basic Value.t -> 'a Type.basic t
+      end
+
+      module Namespace : sig
+        include module type of struct
+          include Namespace
+        end
+
+        val of_value : is_set:bool -> 'a Value.t -> 'a t
       end
     end
 
@@ -463,12 +518,14 @@ module type Language = sig
         include Expression
       end
 
-      val untype : 'a t -> Untyped.Expression.t
+      val to_set : ('a, _) t -> ('a, set) t
+      val untype : ('a, 'is_set) t -> Untyped.Expression.t
 
       val type_check
         :  Untyped.Expression.t
         -> expected:'a Type.t
-        -> ('a t, Type_error.t) result
+        -> is_set:(string, 's) is_set
+        -> (('a, 's) t, Type_error.t) result
     end
 
     module Env : sig
@@ -480,15 +537,52 @@ module type Language = sig
       val initial : t
 
       val find : t -> 'a Identifier.t -> 'a Value.t option
+      val find_expanding_sets : t -> 'a Identifier.t -> 'a Value.t Nonempty_list.t option
 
-      (** Adds a new binding to the environment. *)
-      val bind : t -> 'a Pattern.t -> 'a Value.t -> t
+      (** [bind env ~loc ~is_set pat value] adds a new binding to [pat] in [env]. [value]
+          is used for the [preserve_atoms] entry, and its fully expanded version for the
+          [expand_atoms_bound_to_sets] entry.
 
-      (** Evaluates an expression in the given environment. Unbound
+          Produces an [Error] if binding against this pattern would shadow an identifier
+          from a different namespace, or if evaluating value while expanding identifiers
+          produces an error. *)
+      val bind
+        :  t
+        -> loc:location
+        -> is_set:bool
+        -> 'a Pattern.t
+        -> 'a Value.t
+        -> (t, Syntax_error.t) result
+
+      (** [bind_set env ~loc ident values] adds a new set binding to [ident] in [env].
+          [ident] is used as the [preserve_atoms] entry, and [values] as the
+          [expand_atoms_bound_to_sets] entry. *)
+      val bind_set
+        :  t
+        -> loc:location
+        -> 'a Type.basic Identifier.t
+        -> 'a Type.basic Value.t Nonempty_list.t
+        -> (t, Syntax_error.t) result
+
+      (** Evaluate an expression in the given environment. Unbound
           [Expression.Identifier]s are evaluated as an equivalent [Value.Identifier] under
           the assumption that the identifier will be interpreted by the OCaml compiler; if
           it is not, we let the compiler report the error to the user. *)
-      val eval : t -> 'a Expression.t Loc.t -> 'a Value.t
+
+      (** Evaluate a singleton expression without expanding identifiers bound to sets,
+          producing a single value. *)
+      val eval_singleton
+        :  t
+        -> ('a, Expression.singleton) Expression.t Loc.t
+        -> ('a Value.t, Syntax_error.t) result
+
+      (** Evaluate an expression that may contain unions, treating identifiers as
+          determined by [lookup]. Always produces a set of values. *)
+      val eval
+        :  t
+        -> lookup
+        -> ('a, Expression.set) Expression.t Loc.t
+        -> ('a Value.t Nonempty_list.t, Syntax_error.t) result
     end
   end
 
@@ -497,7 +591,11 @@ module type Language = sig
       include Type_error
     end
 
-    val sexp_of_t : t -> Sexp.t
-    val lift_to_error_result : ('a, t) result -> ('a, Sexp.t) result
+    val to_error : loc:Location.t -> t -> Syntax_error.t
+
+    val lift_to_error_result
+      :  loc:Location.t
+      -> ('a, t) result
+      -> ('a, Syntax_error.t) result
   end
 end

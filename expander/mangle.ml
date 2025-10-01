@@ -9,13 +9,16 @@ let rec mangle_value : type a. a Type.basic Value.t -> string =
   fun value ->
     match value with
     | Identifier ident -> ident.ident
-    | Kind_product kinds -> List.map kinds ~f:mangle_value |> group
+    | Kind_product kinds ->
+      kinds |> Nonempty_list.to_list |> List.map ~f:mangle_value |> group
     | Kind_mod (kind, modifiers) ->
       mangle_value kind
       :: "mod"
-      :: (List.map modifiers ~f:mangle_value |> List.sort_uniq ~cmp:String.compare)
+      :: (modifiers
+          |> Nonempty_list.to_list
+          |> List.map ~f:mangle_value
+          |> List.sort_uniq ~cmp:String.compare)
       |> group
-    | Tuple _ -> .
 ;;
 
 let concat_with_underscores = String.concat ~sep:"__"
@@ -61,9 +64,23 @@ module Suffix = struct
             in
             not is_all_default)
         in
-        List.map manglers ~f:(fun (Value.Basic.P value) -> mangle_value value)
+        let set_mangling =
+          (* sets are surrounded with additional [''] to disambiguate from the non-set
+             versions *)
+          match axis with
+          | Set (Set _) -> failwith "Sets of sets not supported"
+          | Set _ -> "''"
+          | _ -> ""
+        in
+        List.map manglers ~f:(fun (Value.Basic.P value) ->
+          String.concat ~sep:"" [ set_mangling; mangle_value value; set_mangling ])
     in
-    { txt = extract Kind @ extract Mode @ extract Modality @ extract Alloc
+    { txt =
+        extract (Set Kind)
+        @ extract Kind
+        @ extract Mode
+        @ extract Modality
+        @ extract Alloc
     ; loc = Location.none
     }
   ;;
@@ -265,21 +282,51 @@ let mangle (type a) (attr_ctx : a Attributes.Context.mono) (node : a) mangle_exp
   if Axis.Map.is_empty mangle_exprs
   then node
   else (
-    let manglers =
+    let results =
       Axis.Map.map
-        (Maybe_explicit.map
-           ~f:
-             (List.map ~f:(fun { txt = Expression.Basic.P expr; loc } ->
-                Value.Basic.P (Env.eval env { txt = expr; loc }))))
+        (fun me ->
+          Maybe_explicit.map me ~f:(fun exprs ->
+            List.map exprs ~f:(fun { txt = Expression.Basic.P expr; loc } ->
+              Import.Result.map
+                (Env.eval_singleton env { txt = expr; loc })
+                ~f:(fun value -> Value.Basic.P value))
+            |> Import.Result.all)
+          |> Maybe_explicit.ok)
         mangle_exprs
     in
-    let suffix = Suffix.create manglers in
-    let (node : a), (_ : Result.t) =
-      match attr_ctx with
-      | Expression -> t#expression suffix node
-      | Module_expr -> t#module_expr suffix node
-      | Core_type -> t#core_type suffix node
-      | Module_type -> t#module_type suffix node
+    let manglers =
+      Axis.Map.filter_map
+        (fun _ -> function
+          | Ok x -> Some x
+          | Error _ -> None)
+        results
     in
-    node)
+    let errors =
+      Axis.Map.filter_map
+        (fun _ -> function
+          | Ok _ -> None
+          | Error e -> Some e)
+        results
+    in
+    match Axis.Map.to_list errors with
+    | [] ->
+      let suffix = Suffix.create manglers in
+      let (node : a), (_ : Result.t) =
+        match attr_ctx with
+        | Expression -> t#expression suffix node
+        | Module_expr -> t#module_expr suffix node
+        | Core_type -> t#core_type suffix node
+        | Module_type -> t#module_type suffix node
+      in
+      node
+    | [ (_, err) ] ->
+      Syntax_error_conversion.to_extension_node
+        (Attributes.Context.mono_to_any attr_ctx)
+        node
+        err
+    | (_, err) :: (_ :: _ as alist) ->
+      Syntax_error_conversion.to_extension_node
+        (Attributes.Context.mono_to_any attr_ctx)
+        node
+        (Syntax_error.combine err (List.map alist ~f:snd)))
 ;;

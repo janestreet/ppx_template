@@ -1,6 +1,7 @@
 open! Stdppx
 open! Import
 include Language_intf.Definitions
+open Result.Let_syntax
 
 module Untyped = struct
   include Untyped
@@ -21,7 +22,7 @@ module Untyped = struct
     include Identifier
 
     let compare t1 t2 = String.compare t1.ident t2.ident
-    let sexp_of_t t = Sexp.Atom t.ident
+    let sexp_of_t t = Atom t.ident
   end
 
   module Value = struct
@@ -32,15 +33,15 @@ module Untyped = struct
       match t1, t2 with
       | Identifier ident1, Identifier ident2 -> Identifier.compare ident1 ident2
       | Kind_product kinds1, Kind_product kinds2 ->
-        List.compare kinds1 kinds2 ~cmp:compare
+        Nonempty_list.compare kinds1 kinds2 ~cmp:compare
       | Kind_mod (kind1, mods1), Kind_mod (kind2, mods2) ->
         (match compare kind1 kind2 with
          | 0 ->
-           let mods1 = List.sort_uniq ~cmp:compare mods1 in
-           let mods2 = List.sort_uniq ~cmp:compare mods2 in
-           List.compare ~cmp:compare mods1 mods2
+           let mods1 = Nonempty_list.sort_uniq ~cmp:compare mods1 in
+           let mods2 = Nonempty_list.sort_uniq ~cmp:compare mods2 in
+           Nonempty_list.compare ~cmp:compare mods1 mods2
          | n -> n)
-      | Tuple ts1, Tuple ts2 -> List.compare ~cmp:compare ts1 ts2
+      | Tuple ts1, Tuple ts2 -> Nonempty_list.compare ~cmp:compare ts1 ts2
       | Identifier _, _ -> -1
       | _, Identifier _ -> 1
       | Kind_product _, _ -> -1
@@ -53,14 +54,19 @@ module Untyped = struct
 
     let rec sexp_of_t : t -> Sexp.t = function
       | Identifier ident -> Identifier.sexp_of_t ident
-      | Kind_product kinds -> List [ Atom "Product"; sexp_of_list sexp_of_t kinds ]
+      | Kind_product kinds ->
+        List [ Atom "Product"; kinds |> Nonempty_list.to_list |> sexp_of_list sexp_of_t ]
       | Kind_mod (kind, mods) ->
         List
           [ Atom "Mod"
           ; sexp_of_t kind
-          ; List.sort_uniq mods ~cmp:compare |> sexp_of_list sexp_of_t
+          ; mods
+            |> Nonempty_list.to_list
+            |> List.sort_uniq ~cmp:compare
+            |> sexp_of_list sexp_of_t
           ]
-      | Tuple ts -> List (Sexp.Atom "Tuple" :: List.map ts ~f:sexp_of_t)
+      | Tuple ts ->
+        List (Atom "Tuple" :: (ts |> Nonempty_list.to_list |> List.map ~f:sexp_of_t))
     ;;
   end
 
@@ -71,7 +77,7 @@ module Untyped = struct
       fun t1 t2 ->
       match t1, t2 with
       | Identifier ident1, Identifier ident2 -> Identifier.compare ident1 ident2
-      | Tuple ts1, Tuple ts2 -> List.compare ~cmp:compare ts1 ts2
+      | Tuple ts1, Tuple ts2 -> Nonempty_list.compare ~cmp:compare ts1 ts2
       | Identifier _, _ -> -1
       | _, Identifier _ -> 1
       | Tuple _, _ -> .
@@ -80,7 +86,8 @@ module Untyped = struct
 
     let rec sexp_of_t : t -> Sexp.t = function
       | Identifier ident -> Identifier.sexp_of_t ident
-      | Tuple ts -> List (Sexp.Atom "Tuple" :: List.map ts ~f:sexp_of_t)
+      | Tuple ts ->
+        List (Atom "Tuple" :: (ts |> Nonempty_list.to_list |> List.map ~f:sexp_of_t))
     ;;
   end
 
@@ -92,35 +99,43 @@ module Untyped = struct
       match t1, t2 with
       | Identifier ident1, Identifier ident2 -> Identifier.compare ident1 ident2
       | Kind_product kinds1, Kind_product kinds2 ->
-        List.compare kinds1 kinds2 ~cmp:compare
+        Nonempty_list.compare kinds1 kinds2 ~cmp:compare
       | Kind_mod (kind1, mods1), Kind_mod (kind2, mods2) ->
         (match compare kind1 kind2 with
          | 0 ->
-           let mods1 = List.sort_uniq ~cmp:compare mods1 in
-           let mods2 = List.sort_uniq ~cmp:compare mods2 in
-           List.compare ~cmp:compare mods1 mods2
+           let mods1 = Nonempty_list.sort_uniq ~cmp:compare mods1 in
+           let mods2 = Nonempty_list.sort_uniq ~cmp:compare mods2 in
+           Nonempty_list.compare ~cmp:compare mods1 mods2
          | n -> n)
-      | Tuple ts1, Tuple ts2 -> List.compare ~cmp:compare ts1 ts2
+      | Comma_separated ts1, Comma_separated ts2 ->
+        Nonempty_list.compare ~cmp:compare ts1 ts2
       | Identifier _, _ -> -1
       | _, Identifier _ -> 1
       | Kind_product _, _ -> -1
       | _, Kind_product _ -> 1
       | Kind_mod _, _ -> -1
       | _, Kind_mod _ -> 1
-      | Tuple _, _ -> .
-      | _, Tuple _ -> .
+      | Comma_separated _, _ -> .
+      | _, Comma_separated _ -> .
     ;;
 
     let rec sexp_of_t : t -> Sexp.t = function
       | Identifier ident -> Identifier.sexp_of_t ident
-      | Kind_product kinds -> List (Atom "Product" :: List.map kinds ~f:sexp_of_t)
+      | Kind_product kinds ->
+        List (Atom "Product" :: (kinds |> Nonempty_list.to_list |> List.map ~f:sexp_of_t))
       | Kind_mod (kind, mods) ->
         List
           [ Atom "Mod"
           ; sexp_of_t kind
-          ; List.sort_uniq mods ~cmp:compare |> sexp_of_list sexp_of_t
+          ; mods
+            |> Nonempty_list.to_list
+            |> List.sort_uniq ~cmp:compare
+            |> sexp_of_list sexp_of_t
           ]
-      | Tuple ts -> List (Sexp.Atom "Tuple" :: List.map ts ~f:sexp_of_t)
+      | Comma_separated ts ->
+        List
+          (Atom "Comma_separated" :: (ts |> Nonempty_list.to_list |> List.map ~f:sexp_of_t)
+          )
     ;;
   end
 end
@@ -209,7 +224,6 @@ module Typed = struct
         item list -> length Type.tuple -> ((item, length) t, wrong_length) result
       =
       fun items length ->
-      let open Result.Let_syntax in
       match items, length with
       | [], [] -> Ok []
       | hd_items :: tl_items, _ :: tl_length ->
@@ -229,7 +243,11 @@ module Typed = struct
       | Basic Mode -> Mode
       | Basic Modality -> Modality
       | Basic Alloc -> Alloc
-      | Tuple _ -> .
+    ;;
+
+    let is_set : type a. a t -> bool = function
+      | Set _ -> true
+      | Kind | Mode | Modality | Alloc -> false
     ;;
 
     module Map = Map.Make (struct
@@ -255,6 +273,17 @@ module Typed = struct
           | "unyielding" | "yielding" -> Known Yielding
           | _ -> Unrecognized
         ;;
+
+        let sexp_of_t = function
+          | Locality -> Atom "Locality"
+          | Portability -> Atom "Portability"
+          | Contention -> Atom "Contention"
+          | Visibility -> Atom "Visibility"
+          | Access -> Atom "Access"
+          | Affinity -> Atom "Affinity"
+          | Uniqueness -> Atom "Uniqueness"
+          | Yielding -> Atom "Yielding"
+        ;;
       end
 
       module Mode = struct
@@ -277,6 +306,8 @@ module Typed = struct
           | Known m -> Known (Mode m)
           | Unrecognized -> Unrecognized
         ;;
+
+        let sexp_of_t (Mode m) = Modal.sexp_of_t m
       end
 
       module Modality = struct
@@ -298,6 +329,17 @@ module Typed = struct
           match Modal.of_mode_identifier str with
           | Known m -> Known (Modality m)
           | Unrecognized -> Unrecognized
+        ;;
+
+        let sexp_of_t (Modality m) = Modal.sexp_of_t m
+      end
+
+      module Or_unrecognized = struct
+        include Or_unrecognized
+
+        let sexp_of_t sexp_of_a = function
+          | Known a -> sexp_of_a a
+          | Unrecognized -> Atom "unrecognized"
         ;;
       end
 
@@ -322,7 +364,70 @@ module Typed = struct
         | Identifier ident -> of_identifier ident
         | Kind_product _ -> Kind
         | Kind_mod _ -> Kind
-        | Tuple _ -> .
+      ;;
+
+      let sexp_of_t : type a. a t -> Sexp.t = function
+        | Kind -> Atom "Kind"
+        | Mode m -> List [ Atom "Mode"; Or_unrecognized.sexp_of_t Mode.sexp_of_t m ]
+        | Modality m ->
+          List [ Atom "Modality"; Or_unrecognized.sexp_of_t Modality.sexp_of_t m ]
+        | Alloc -> Atom "Alloc"
+      ;;
+    end
+
+    module Namespace = struct
+      include Namespace
+
+      let rec of_value : type a. is_set:bool -> a Value.t -> a t =
+        fun ~is_set val_ ->
+        let to_namespace sub_axis = if is_set then Set sub_axis else One_axis sub_axis in
+        match val_ with
+        | Identifier _ -> to_namespace (Sub_axis.of_value val_)
+        | Kind_product _ -> to_namespace (Sub_axis.of_value val_)
+        | Kind_mod _ -> to_namespace (Sub_axis.of_value val_)
+        | Tuple tp -> Tuple (of_value_tuple ~is_set tp)
+
+      and of_value_tuple : type a. is_set:bool -> a Value.tuple -> a tuple =
+        fun ~is_set tp ->
+        match tp with
+        | [] -> []
+        | hd :: tl -> of_value ~is_set hd :: of_value_tuple ~is_set tl
+      ;;
+
+      (* equality modulo mode/modality conflation *)
+      let rec same_namespace : type a b. a t -> b t -> bool =
+        fun tp1 tp2 ->
+        match tp1, tp2 with
+        | One_axis tp1, One_axis tp2 | Set tp1, Set tp2 ->
+          (* We conflate modalities and modes *)
+          (match tp1, tp2 with
+           | Mode (Known (Mode m1)), Modality (Known (Modality m2)) -> m1 = m2
+           | Modality (Known (Modality m1)), Mode (Known (Mode m2)) -> m1 = m2
+           | Mode Unrecognized, Modality Unrecognized
+           | Modality Unrecognized, Mode Unrecognized -> true
+           | _, _ -> Sub_axis.compare_packed (P tp1) (P tp2) = 0)
+        | Tuple tp1, Tuple tp2 -> same_namespace_tuple tp1 tp2
+        | (One_axis _ | Set _), Tuple _
+        | Tuple _, (One_axis _ | Set _)
+        | One_axis _, Set _
+        | Set _, One_axis _ -> false
+
+      and same_namespace_tuple : type a b. a tuple -> b tuple -> bool =
+        fun tp1 tp2 ->
+        match tp1, tp2 with
+        | [], [] -> true
+        | hd1 :: tl1, hd2 :: tl2 -> same_namespace hd1 hd2 && same_namespace_tuple tl1 tl2
+        | [], _ :: _ | _ :: _, [] -> false
+      ;;
+
+      let rec sexp_of_t : type a. a t -> Sexp.t = function
+        | One_axis t -> Sub_axis.sexp_of_t t
+        | Set t -> List [ Atom "Set"; Sub_axis.sexp_of_t t ]
+        | Tuple tp -> List (Atom "Tuple" :: sexp_of_tuple tp)
+
+      and sexp_of_tuple : type a. a tuple -> Sexp.t list = function
+        | [] -> []
+        | hd :: tl -> sexp_of_t hd :: sexp_of_tuple tl
       ;;
     end
   end
@@ -342,13 +447,14 @@ module Typed = struct
 
     let rec untype : type a. a t -> Untyped.Value.t = function
       | Identifier { ident; type_ = _ } -> Identifier { ident }
-      | Kind_product kinds -> Kind_product (List.map kinds ~f:untype)
-      | Kind_mod (kind, mods) -> Kind_mod (untype kind, List.map mods ~f:untype)
+      | Kind_product kinds -> Kind_product (Nonempty_list.map kinds ~f:untype)
+      | Kind_mod (kind, mods) -> Kind_mod (untype kind, Nonempty_list.map mods ~f:untype)
       | Tuple tp -> Tuple (untype_tuple tp)
 
-    and untype_tuple : type a. a tuple -> Untyped.Value.t list = function
-      | [] -> []
-      | hd :: tl -> untype hd :: untype_tuple tl
+    and untype_tuple : type a b. (a * b) tuple -> Untyped.Value.t Nonempty_list.t
+      = function
+      | [ hd ] -> [ untype hd ]
+      | hd :: (_ :: _ as tl) -> untype hd :: Nonempty_list.to_list (untype_tuple tl)
     ;;
 
     let compare t1 t2 = Untyped.Value.compare (untype t1) (untype t2)
@@ -362,6 +468,22 @@ module Typed = struct
     and type_tuple : type a. a tuple -> a Type.tuple = function
       | [] -> []
       | hd :: tl -> type_ hd :: type_tuple tl
+    ;;
+
+    (* Translate a value back into the expression that most directly corresponds to it.
+       More exactly, [eval (as_expression t) === t] when evaluating in an empty
+       environment. *)
+    let rec as_expression : type a. a t -> (a, Expression.singleton) Expression.t
+      = function
+      | Identifier ident -> Identifier ident
+      | Kind_mod (kind, mods) ->
+        Kind_mod (as_expression kind, Nonempty_list.map mods ~f:as_expression)
+      | Kind_product kinds -> Kind_product (Nonempty_list.map kinds ~f:as_expression)
+      | Tuple tp -> Tuple (uneval_tuple tp)
+
+    and uneval_tuple : type a. a tuple -> a Expression.tuple = function
+      | [] -> []
+      | hd :: tl -> as_expression hd :: uneval_tuple tl
     ;;
 
     let is_default : type a. a Type.basic t -> bool =
@@ -379,8 +501,6 @@ module Typed = struct
          | Modality (Known axis) ->
            String.equal ident.ident (Axis.Sub_axis.Modality.default axis))
       | Basic Alloc, Identifier { ident; _ } -> String.equal ident "heap"
-      | Basic _, Tuple _ -> .
-      | Tuple _, _ -> .
     ;;
 
     let rec to_node : type a. a Type.basic t -> loc:location -> a Type.basic Node.t =
@@ -392,11 +512,12 @@ module Typed = struct
          | Basic Modality -> Modality { txt = Modality ident; loc }
          | Basic Kind ->
            Jkind_annotation { pjkind_desc = Abbreviation ident; pjkind_loc = loc }
-         | Basic Alloc -> Alloc
-         | Tuple _ -> .)
+         | Basic Alloc -> Alloc)
       | Kind_product kinds ->
         let kinds =
-          List.map kinds ~f:(fun kind ->
+          kinds
+          |> Nonempty_list.to_list
+          |> List.map ~f:(fun kind ->
             let (Jkind_annotation kind) = to_node ~loc kind in
             kind)
         in
@@ -404,12 +525,13 @@ module Typed = struct
       | Kind_mod (kind, mods) ->
         let (Jkind_annotation kind) = to_node ~loc kind in
         let mods =
-          List.sort_uniq mods ~cmp:compare
+          mods
+          |> Nonempty_list.to_list
+          |> List.sort_uniq ~cmp:compare
           |> List.map ~f:(fun (Identifier { ident; type_ = Basic Modality }) ->
             { txt = Mode ident; loc })
         in
         Jkind_annotation { pjkind_desc = Mod (kind, mods); pjkind_loc = loc }
-      | Tuple _ -> .
     ;;
   end
 
@@ -420,41 +542,43 @@ module Typed = struct
       | Identifier { ident; type_ = _ } -> Identifier { ident }
       | Tuple tp -> Tuple (untype_tuple tp)
 
-    and untype_tuple : type a. a tuple -> Untyped.Pattern.t list = function
-      | [] -> []
-      | hd :: tl -> untype hd :: untype_tuple tl
+    and untype_tuple : type a b. (a * b) tuple -> Untyped.Pattern.t Nonempty_list.t
+      = function
+      | [ hd ] -> [ untype hd ]
+      | hd :: (_ :: _ as tl) -> untype hd :: Nonempty_list.to_list (untype_tuple tl)
     ;;
 
     let rec type_check
       : type a. Untyped.Pattern.t -> expected:a Type.t -> (a t, Type_error.t) result
       =
-      let open Result.Let_syntax in
       fun untyped ~expected ->
-        match untyped, expected with
-        | Identifier { ident }, type_ -> Ok (Identifier { ident; type_ })
-        | Tuple untyped_tp, Tuple type_tp ->
-          let* vec =
-            match Vec.of_list_with_length untyped_tp type_tp with
-            | Ok vec -> Ok vec
-            | Error Wrong_length ->
-              Error
-                (Type_error.Tuple_length_mismatch
-                   { kind = "pattern"
-                   ; sexp_of_kind = Untyped.Pattern.sexp_of_t
-                   ; value = Tuple untyped_tp
-                   ; expected_type = Tuple type_tp
-                   })
-          in
-          let+ tuple = type_check_tuple vec ~expected:type_tp in
-          Tuple tuple
-        | (Tuple _ as node), (Basic _ as type_) ->
-          Error
-            (Type_mismatch
-               { kind = "pattern"
-               ; sexp_of_kind = Untyped.Pattern.sexp_of_t
-               ; value = node
-               ; expected_type = type_
-               })
+      match untyped, expected with
+      | Identifier { ident }, type_ -> Ok (Identifier { ident; type_ })
+      | Tuple untyped_tp, Tuple type_tp ->
+        let* vec =
+          match Vec.of_list_with_length (Nonempty_list.to_list untyped_tp) type_tp with
+          | Ok vec -> Ok vec
+          | Error Wrong_length ->
+            Error
+              (Type_error.Tuple_length_mismatch
+                 { kind = "pattern"
+                 ; sexp_of_kind = Untyped.Pattern.sexp_of_t
+                 ; value = Tuple untyped_tp
+                 ; expected_type = Tuple type_tp
+                 })
+        in
+        let+ tuple = type_check_tuple vec ~expected:type_tp in
+        Tuple tuple
+      | (Tuple _ as node), (Basic _ as type_) ->
+        Error
+          (Type_mismatch
+             { kind = "pattern"
+             ; sexp_of_kind = Untyped.Pattern.sexp_of_t
+             ; value = node
+             ; expected_type = type_
+             ; expected_sets = None
+             ; hint = None
+             })
 
     and type_check_tuple
       : type a.
@@ -463,7 +587,6 @@ module Typed = struct
         -> (a tuple, Type_error.t) result
       =
       fun untyped ~expected ->
-      let open Result.Let_syntax in
       match untyped, expected with
       | [], [] -> Ok []
       | untyped_hd :: untyped_tl, type_hd :: type_tl ->
@@ -476,74 +599,114 @@ module Typed = struct
   module Expression = struct
     include Expression
 
-    let rec type_ : type a. a t -> a Type.t = function
+    let sexp_of_sets : type s. (string, s) is_set -> Sexp.t = function
+      | Singleton _hint -> Atom "singleton"
+      | Set -> Atom "set with unions"
+    ;;
+
+    let rec type_ : type a is_set. (a, is_set) t -> a Type.t = function
       | Identifier { type_; _ } -> type_
       | Kind_mod _ -> Type.kind
       | Kind_product _ -> Type.kind
       | Tuple tp -> Tuple (type_tuple tp)
+      | Union (hd :: _) -> type_ hd
 
-    and type_tuple : type a. a tuple -> a Type.tuple = function
-      | [] -> []
-      | hd :: tl -> type_ hd :: type_tuple tl
+    and type_tuple : type a b. (a * b) tuple -> (a * b) Type.tuple = function
+      | [ hd ] -> [ type_ hd ]
+      | hd :: (_ :: _ as tl) -> type_ hd :: type_tuple tl
     ;;
 
-    let rec untype : type a. a t -> Untyped.Expression.t = function
+    let rec untype : type a is_set. (a, is_set) t -> Untyped.Expression.t = function
       | Identifier { ident; type_ = _ } -> Identifier { ident }
-      | Kind_mod (kind, mods) -> Kind_mod (untype kind, List.map mods ~f:untype)
-      | Kind_product kinds -> Kind_product (List.map kinds ~f:untype)
-      | Tuple tp -> Tuple (untype_tuple tp)
+      | Kind_mod (kind, mods) -> Kind_mod (untype kind, Nonempty_list.map mods ~f:untype)
+      | Kind_product kinds -> Kind_product (Nonempty_list.map kinds ~f:untype)
+      | Tuple tp -> Comma_separated (untype_tuple tp)
+      | Union ts -> Comma_separated (Nonempty_list.map ts ~f:untype)
 
-    and untype_tuple : type a. a tuple -> Untyped.Expression.t list = function
-      | [] -> []
-      | hd :: tl -> untype hd :: untype_tuple tl
+    and untype_tuple : type a b. (a * b) tuple -> Untyped.Expression.t Nonempty_list.t
+      = function
+      | [ hd ] -> [ untype hd ]
+      | hd :: (_ :: _ as tl) -> untype hd :: Nonempty_list.to_list (untype_tuple tl)
     ;;
 
-    let type_mismatch value type_ =
+    let rec to_set : type a is_set. (a, is_set) t -> (a, set) t = function
+      | Identifier ident -> Identifier ident
+      | Kind_mod (kind, mods) -> Kind_mod (to_set kind, mods)
+      | Kind_product kinds -> Kind_product (Nonempty_list.map kinds ~f:to_set)
+      | Tuple tp -> Tuple tp
+      | Union ts -> Union (Nonempty_list.map ts ~f:to_set)
+    ;;
+
+    let type_mismatch
+      (type s)
+      ?hint
+      ~value
+      ~expected
+      ~(is_set : (string, s) Expression.is_set)
+      ()
+      =
       Error
         (Type_error.Type_mismatch
            { kind = "expression"
            ; sexp_of_kind = Untyped.Expression.sexp_of_t
            ; value
-           ; expected_type = type_
+           ; expected_type = expected
+           ; expected_sets = Some is_set
+           ; hint
            })
     ;;
 
     let rec type_check
-      : type a. Untyped.Expression.t -> expected:a Type.t -> (a t, Type_error.t) result
+      : type a s.
+        Untyped.Expression.t
+        -> expected:a Type.t
+        -> is_set:(string, s) is_set
+        -> ((a, s) t, Type_error.t) result
       =
-      let open Result.Let_syntax in
-      fun untyped ~expected ->
-        match untyped, expected with
-        | Identifier { ident }, type_ -> Ok (Identifier { ident; type_ })
-        | Kind_product kinds, Basic Kind ->
-          let+ kinds =
-            List.map kinds ~f:(type_check ~expected:(Basic Kind)) |> Result.all
-          in
-          Kind_product kinds
-        | (Kind_product _ as value), type_ -> type_mismatch value type_
-        | Kind_mod (kind, mods), Basic Kind ->
-          let* kind = type_check kind ~expected:(Basic Kind) in
-          let+ mods =
-            List.map mods ~f:(type_check ~expected:(Basic Modality)) |> Result.all
-          in
-          Kind_mod (kind, mods)
-        | (Kind_mod _ as value), type_ -> type_mismatch value type_
-        | Tuple untyped_tp, Tuple type_tp ->
-          let* vec =
-            match Vec.of_list_with_length untyped_tp type_tp with
-            | Ok vec -> Ok vec
-            | Error Wrong_length ->
-              Error
-                (Type_error.Tuple_length_mismatch
-                   { kind = "expression"
-                   ; sexp_of_kind = Untyped.Expression.sexp_of_t
-                   ; value = Tuple untyped_tp
-                   ; expected_type = Tuple type_tp
-                   })
-          in
-          let+ tuple = type_check_tuple vec ~expected:type_tp in
-          Tuple tuple
-        | (Tuple _ as value), (Basic _ as type_) -> type_mismatch value type_
+      fun untyped ~expected ~is_set ->
+      match untyped, expected with
+      | Identifier { ident }, type_ -> Ok (Identifier { ident; type_ })
+      | Kind_product kinds, Basic Kind ->
+        let+ kinds =
+          Nonempty_list.map_result kinds ~f:(type_check ~expected:(Basic Kind) ~is_set)
+        in
+        Kind_product kinds
+      | (Kind_product _ as value), expected -> type_mismatch ~value ~expected ~is_set ()
+      | Kind_mod (kind, mods), Basic Kind ->
+        let* kind = type_check kind ~expected:(Basic Kind) ~is_set in
+        let+ mods =
+          Nonempty_list.map_result
+            mods
+            ~f:
+              (type_check
+                 ~expected:(Basic Modality)
+                 ~is_set:(Singleton "sets not allowed inside [kind mod] modalities"))
+        in
+        Kind_mod (kind, mods)
+      | (Kind_mod _ as value), expected -> type_mismatch ~value ~expected ~is_set ()
+      | Comma_separated untyped_tp, Tuple type_tp ->
+        let* vec =
+          match Vec.of_list_with_length (Nonempty_list.to_list untyped_tp) type_tp with
+          | Ok vec -> Ok vec
+          | Error Wrong_length ->
+            Error
+              (Type_error.Tuple_length_mismatch
+                 { kind = "expression"
+                 ; sexp_of_kind = Untyped.Expression.sexp_of_t
+                 ; value = untyped
+                 ; expected_type = expected
+                 })
+        in
+        let+ tuple = type_check_tuple vec ~expected:type_tp in
+        Tuple tuple
+      | Comma_separated untyped_union, Basic _ ->
+        (match is_set with
+         | Singleton hint -> type_mismatch ~hint ~value:untyped ~expected ~is_set ()
+         | Set ->
+           let+ subsets =
+             Nonempty_list.map_result untyped_union ~f:(type_check ~expected ~is_set:Set)
+           in
+           Union (subsets :> (_, set) t Nonempty_list.t))
 
     and type_check_tuple
       : type a.
@@ -551,19 +714,49 @@ module Typed = struct
         -> expected:a Type.tuple
         -> (a tuple, Type_error.t) result
       =
-      let open Result.Let_syntax in
       fun untyped ~expected ->
-        match untyped, expected with
-        | [], [] -> Ok []
-        | untyped_hd :: untyped_tl, type_hd :: type_tl ->
-          let* hd = type_check untyped_hd ~expected:type_hd in
-          let+ tl = type_check_tuple untyped_tl ~expected:type_tl in
-          hd :: tl
+      match untyped, expected with
+      | [], [] -> Ok []
+      | untyped_hd :: untyped_tl, type_hd :: type_tl ->
+        let* hd =
+          type_check
+            untyped_hd
+            ~expected:type_hd
+            ~is_set:(Singleton "sets not allowed inside tuples")
+        in
+        let+ tl = type_check_tuple untyped_tl ~expected:type_tl in
+        hd :: tl
     ;;
   end
 
   module Env = struct
     include Env
+
+    let value_entry ident value ~is_set : Entry.t =
+      Entry
+        { ident
+        ; preserve_atoms = value
+        ; expand_atoms_bound_to_sets = [ value ]
+        ; namespace = Axis.Namespace.of_value ~is_set value
+        }
+    ;;
+
+    let set_entry ident (values : _ Nonempty_list.t) : Entry.t =
+      let namespace =
+        let (value :: _) =
+          (* We make the simplifying assumption that all values in the set have have the
+             same namespace *)
+          values
+        in
+        Axis.Namespace.of_value ~is_set:true value
+      in
+      Entry
+        { ident
+        ; preserve_atoms = Identifier ident
+        ; expand_atoms_bound_to_sets = values
+        ; namespace
+        }
+    ;;
 
     let initial : t =
       let open Identifier in
@@ -575,177 +768,474 @@ module Typed = struct
       let stack_alloc_mode =
         { ident = "stack_local"; type_ = Type.(tuple2 alloc mode) }
       in
-      [ Entry (heap_alloc, Identifier heap_alloc)
-      ; Entry (stack_alloc, Identifier stack_alloc)
-      ; Entry (heap_alloc_mode, Tuple [ Identifier heap_alloc; Identifier global_mode ])
-      ; Entry (stack_alloc_mode, Tuple [ Identifier stack_alloc; Identifier local_mode ])
+      let kind_ident k = { ident = k; type_ = Type.kind } in
+      let kind k : _ Value.t = Identifier (kind_ident k) in
+      let base_non_value : _ Nonempty_list.t =
+        [ kind "bits64"; kind "bits32"; kind "word"; kind "float64"; kind "float32" ]
+      in
+      (* [value] is last so that, when templating record or variant types, the fields and
+         constructors for the unmangled type are the ones in scope. *)
+      let value_with_imm : _ Nonempty_list.t =
+        [ kind "immediate"; kind "immediate64"; kind "value" ]
+      in
+      let value_or_null_with_imm : _ Nonempty_list.t =
+        [ kind "immediate"; kind "immediate64"; kind "value_or_null" ]
+      in
+      let kind_set_ident = kind_ident in
+      let value_entry ?(is_set = true) ident value = value_entry ident value ~is_set in
+      [ value_entry heap_alloc (Identifier heap_alloc)
+      ; value_entry stack_alloc (Identifier stack_alloc)
+      ; value_entry
+          ~is_set:false
+          heap_alloc_mode
+          (Tuple [ Identifier heap_alloc; Identifier global_mode ])
+      ; value_entry
+          ~is_set:false
+          stack_alloc_mode
+          (Tuple [ Identifier stack_alloc; Identifier local_mode ])
+      ; set_entry (kind_set_ident "base_non_value") base_non_value
+      ; set_entry (kind_set_ident "value_with_imm") value_with_imm
+      ; set_entry (kind_set_ident "value_or_null_with_imm") value_or_null_with_imm
+      ; set_entry
+          (kind_set_ident "base")
+          (Nonempty_list.concat [ base_non_value; [ kind "value" ] ])
+      ; set_entry
+          (kind_set_ident "base_with_imm")
+          (Nonempty_list.concat [ base_non_value; value_with_imm ])
+      ; set_entry
+          (kind_set_ident "base_or_null")
+          (Nonempty_list.concat [ base_non_value; [ kind "value_or_null" ] ])
+      ; set_entry
+          (kind_set_ident "base_or_null_with_imm")
+          (Nonempty_list.concat [ base_non_value; value_or_null_with_imm ])
       ]
     ;;
 
     let find (type a) (t : t) (ident : a Identifier.t) =
-      List.find_map t ~f:(fun (Entry (ident', value)) ->
-        Option.map (Identifier.equal_witness ident ident') ~f:(fun Equal : a Value.t ->
-          value))
+      List.find_map
+        t
+        ~f:
+          (fun
+            (Entry
+              { ident = ident'
+              ; preserve_atoms = value
+              ; expand_atoms_bound_to_sets = _
+              ; namespace = _
+              })
+          ->
+          Option.map (Identifier.equal_witness ident ident') ~f:(fun Equal : a Value.t ->
+            value))
     ;;
 
-    let rec bind : type a. t -> a Pattern.t -> a Value.t -> t =
-      fun env pat value ->
+    let find_expanding_sets (type a) (t : t) (ident : a Identifier.t) =
+      List.find_map
+        t
+        ~f:
+          (fun
+            (Entry
+              { ident = ident'
+              ; preserve_atoms = _
+              ; expand_atoms_bound_to_sets = values
+              ; namespace = _
+              })
+          ->
+          Option.map
+            (Identifier.equal_witness ident ident')
+            ~f:(fun Equal : a Value.t Nonempty_list.t -> values))
+    ;;
+
+    module Eval_result = struct
+      type (_, _) t =
+        | Singleton : 'a -> ('a, [ `one ]) t
+        | Set : 'a Nonempty_list.t -> ('a, [ `many ]) t
+
+      let map : type a b r. (a, r) t -> f:(a -> b) -> (b, r) t =
+        fun t ~f ->
+        match t with
+        | Singleton value -> Singleton (f value)
+        | Set values -> Set (Nonempty_list.map values ~f)
+      ;;
+
+      let bind_res
+        : type a b r e. (a, r) t -> f:(a -> ((b, r) t, e) result) -> ((b, r) t, e) result
+        =
+        fun t ~f ->
+        match t with
+        | Singleton value -> f value
+        | Set values ->
+          let+ values =
+            Nonempty_list.map_result values ~f:(fun value ->
+              let+ (Set values) = f value in
+              values)
+          in
+          Set (Nonempty_list.concat values)
+      ;;
+
+      let product : type a r. (a, r) t Nonempty_list.t -> (a Nonempty_list.t, r) t =
+        fun (hd :: tl) ->
+        match hd with
+        | Singleton hd ->
+          let tl = List.map tl ~f:(fun (Singleton tl) -> tl) in
+          Singleton (hd :: tl)
+        | Set hd ->
+          let tl = List.map tl ~f:(fun (Set tl) -> tl) in
+          Set (Nonempty_list.product (hd :: tl))
+      ;;
+
+      module Witness = struct
+        type _ size =
+          | One : [ `one ] size
+          | Many : [ `many ] size
+
+        type (_, _, _) size_reason =
+          | Simple : (Expression.singleton, [ `singleton_lookup ], [ `one ]) size_reason
+          | Expr_has_unions : (Expression.set, _, [ `many ]) size_reason
+          | Lookup_is_expanding_identifiers : (_, [ `set_lookup ], [ `many ]) size_reason
+
+        type _ lookup =
+          | Preserve_atoms : [ `singleton_lookup ] lookup
+          | Expand_atoms_bound_to_sets : [ `set_lookup ] lookup
+
+        type ('s, 'r) t =
+          | Eval_witness :
+              { is_set : (unit, 's) Expression.is_set
+              ; lookup : 'l lookup
+              ; result_size : 'r size
+              ; because : ('s, 'l, 'r) size_reason
+              }
+              -> ('s, 'r) t
+
+        let singleton =
+          Eval_witness
+            { is_set = Singleton ()
+            ; lookup = Preserve_atoms
+            ; result_size = One
+            ; because = Simple
+            }
+        ;;
+
+        let explicit_set ~lookup =
+          Eval_witness
+            { is_set = Set; lookup; result_size = Many; because = Expr_has_unions }
+        ;;
+
+        let expand_atoms ~is_set =
+          Eval_witness
+            { is_set
+            ; lookup = Expand_atoms_bound_to_sets
+            ; result_size = Many
+            ; because = Lookup_is_expanding_identifiers
+            }
+        ;;
+      end
+    end
+
+    let rec eval_general
+      : type a s r.
+        t
+        -> loc:location
+        -> (s, r) Eval_result.Witness.t
+        -> (a, s) Expression.t
+        -> ((a Value.t, r) Eval_result.t, Syntax_error.t) result
+      =
+      fun env ~loc eval_witness expr ->
+      let (Eval_witness { is_set; lookup; result_size; because = result_size_reason }) =
+        eval_witness
+      in
+      match expr with
+      | Kind_product kinds ->
+        kinds
+        |> Nonempty_list.map_result ~f:(eval_general env ~loc eval_witness)
+        >>| Eval_result.product
+        >>| Eval_result.map ~f:(fun kinds : _ Value.t -> Kind_product kinds)
+      | Kind_mod (kind, mods) ->
+        let* kind = eval_general env ~loc eval_witness kind in
+        let+ (Singleton mods) =
+          Nonempty_list.map_result
+            ~f:(eval_general env ~loc Eval_result.Witness.singleton)
+            mods
+          >>| Eval_result.product
+        in
+        let mods = Nonempty_list.sort_uniq ~cmp:Value.compare mods in
+        Eval_result.map kind ~f:(fun kind : _ Value.t -> Kind_mod (kind, mods))
+      | Tuple tp ->
+        let+ tp = eval_tuple env ~loc tp in
+        let value : _ Value.t = Tuple tp in
+        (match result_size with
+         | One -> (Singleton value : (_, r) Eval_result.t)
+         | Many -> Set [ value ])
+      | Union exprs ->
+        let Set, Many, _ = is_set, result_size, result_size_reason in
+        Eval_result.bind_res (Set exprs) ~f:(fun expr ->
+          expr
+          |> Expression.to_set
+          |> eval_general env ~loc (Eval_result.Witness.explicit_set ~lookup))
+      | Identifier ident as expr ->
+        let found : (_, r) Eval_result.t option =
+          match lookup, result_size, result_size_reason with
+          | Preserve_atoms, One, _ ->
+            Option.map (find env ident) ~f:(fun value -> Eval_result.Singleton value)
+          | Preserve_atoms, Many, _ ->
+            Option.map (find env ident) ~f:(fun value -> Eval_result.Set [ value ])
+          | Expand_atoms_bound_to_sets, Many, _ ->
+            Option.map (find_expanding_sets env ident) ~f:(fun values ->
+              Eval_result.Set values)
+          | _ -> .
+        in
+        (match found with
+         | Some value -> Ok value
+         | None ->
+           let typ = Expression.type_ expr in
+           (match typ with
+            | Basic (Mode | Modality | Kind) ->
+              (* We assume the identifier is a built-in and let the compiler provide an
+                 error message if not. *)
+              Ok
+                (match result_size with
+                 | One -> Singleton (Identifier ident)
+                 | Many -> Set [ Identifier ident ])
+            | Tuple _ | Basic Alloc ->
+              let hint =
+                match typ, ident.ident with
+                | Basic Alloc, "heap_global" -> Some "Did you mean [heap]?"
+                | Basic Alloc, "stack_local" -> Some "Did you mean [stack]?"
+                | Tuple [ Basic Alloc; Basic Mode ], "heap" ->
+                  Some "Did you mean [heap_global]?"
+                | Tuple [ Basic Alloc; Basic Mode ], "stack" ->
+                  Some "Did you mean [stack_local]?"
+                | _ ->
+                  (match
+                     List.find_map env ~f:(fun (Entry { ident = ident'; _ }) ->
+                       if String.equal ident'.ident ident.ident
+                       then Some (Type.sexp_of_t ident'.type_)
+                       else None)
+                   with
+                   | None -> None
+                   | Some type_ ->
+                     Some
+                       (Printf.sprintf
+                          "There is a template identifier [%s] in scope with type [%s]."
+                          ident.ident
+                          (Sexp.to_string type_)))
+              in
+              let hint_string =
+                match hint with
+                | None -> ""
+                | Some hint -> "\nHint: " ^ hint
+              in
+              Error
+                (Syntax_error.createf
+                   ~loc
+                   "Unbound template identifier [%s] of type [%a].%s"
+                   ident.ident
+                   Sexplib0.Sexp.pp_hum
+                   (Type.sexp_of_t typ)
+                   hint_string)))
+
+    and eval_tuple
+      : type a.
+        t -> loc:location -> a Expression.tuple -> (a Value.tuple, Syntax_error.t) result
+      =
+      fun env ~loc tuple ->
+      match tuple with
+      | [] -> Ok []
+      | hd :: tl ->
+        let* (Singleton hd) = eval_general env ~loc Eval_result.Witness.singleton hd in
+        let+ tl = eval_tuple env ~loc tl in
+        (hd :: tl : _ Value.tuple)
+    ;;
+
+    let eval_singleton
+      : type a.
+        t
+        -> (a, Expression.singleton) Expression.t Loc.t
+        -> (a Value.t, Syntax_error.t) result
+      =
+      fun env { txt = expr; loc } ->
+      let+ (Singleton res) = eval_general env ~loc Eval_result.Witness.singleton expr in
+      res
+    ;;
+
+    let eval
+      : type a.
+        t
+        -> lookup
+        -> (a, Expression.set) Expression.t Loc.t
+        -> (a Value.t Nonempty_list.t, Syntax_error.t) result
+      =
+      fun env lookup { txt = expr; loc } ->
+      let[@inline] eval_lookup lookup =
+        let+ (Set values) =
+          eval_general env ~loc (Eval_result.Witness.explicit_set ~lookup) expr
+        in
+        values
+      in
+      match lookup with
+      | Preserve_atoms -> eval_lookup Preserve_atoms
+      | Expand_atoms_bound_to_sets -> eval_lookup Expand_atoms_bound_to_sets
+    ;;
+
+    (* We prohibit shadowing a variable that is already bound to values for a
+       different sub-axis. Shadowing a variable in the same sub-axis is permitted. *)
+    let check_ident_shadowing env ~loc ~is_set (pat : _ Identifier.t) value =
+      match
+        List.find_opt env ~f:(fun (Entry.Entry { ident; _ }) ->
+          String.equal ident.ident pat.ident)
+      with
+      | None ->
+        (* this identifier is not shadowing *)
+        Ok ()
+      | Some
+          (Entry
+            { ident = _
+            ; preserve_atoms = old_value
+            ; expand_atoms_bound_to_sets = set_value
+            ; namespace = old_namespace
+            }) ->
+        let namespace = Axis.Namespace.of_value ~is_set value in
+        if Axis.Namespace.same_namespace old_namespace namespace
+        then Ok ()
+        else
+          Error
+            (Syntax_error.createf
+               ~loc
+               "shadowing variables from a different namespace is prohibited\n\
+                attempting to bind\n\
+               \  identifier '%s'\n\
+               \  in namespace '%a'\n\
+                but it is already bound\n\
+               \  in namespace '%a'\n\
+               \  to the value '%a'\n\
+               \  and when fully expanded '%a'"
+               pat.ident
+               Sexplib0.Sexp.pp
+               (Axis.Namespace.sexp_of_t namespace)
+               Sexplib0.Sexp.pp
+               (Axis.Namespace.sexp_of_t old_namespace)
+               Sexplib0.Sexp.pp
+               (old_value |> Value.untype |> Untyped.Value.sexp_of_t)
+               Sexplib0.Sexp.pp
+               (List
+                  (set_value
+                   |> Nonempty_list.to_list
+                   |> List.map ~f:(fun val_ ->
+                     val_ |> Value.untype |> Untyped.Value.sexp_of_t))))
+    ;;
+
+    (* we only cast modes and modalities *)
+    type 'a castable_witness =
+      | Mode : Type.mode castable_witness
+      | Modality : Type.modality castable_witness
+
+    let cast_entry
+      (type a b)
+      (entry : a Entry.entry)
+      (type_ : b Type.basic Type.t)
+      (castable : a castable_witness)
+      ~is_set
+      : Entry.t
+      =
+      let { ident; preserve_atoms; expand_atoms_bound_to_sets; namespace = _ }
+        : _ Entry.entry
+        =
+        entry
+      in
+      let cast_ident (ident : a Identifier.t) : b Type.basic Identifier.t =
+        { type_; ident = ident.ident }
+      in
+      let cast_value (value : a Value.t) : b Type.basic Value.t =
+        match value, castable with
+        | Identifier ident, _ -> Identifier (cast_ident ident)
+        | _, _ -> .
+      in
+      let preserve_atoms = cast_value preserve_atoms in
+      Entry
+        { ident = cast_ident ident
+        ; preserve_atoms
+        ; expand_atoms_bound_to_sets =
+            Nonempty_list.map expand_atoms_bound_to_sets ~f:cast_value
+        ; namespace = Axis.Namespace.of_value ~is_set preserve_atoms
+        }
+    ;;
+
+    let rec bind
+      : type a.
+        t
+        -> loc:location
+        -> is_set:bool
+        -> a Pattern.t
+        -> a Value.t
+        -> (t, Syntax_error.t) result
+      =
+      fun env ~loc ~is_set pat value ->
       match pat, value with
       | Identifier pat, value ->
-        (* We always conflate modes and modalities for the portability and contention axes.
-         These axes have the property that the legacy mode coincides with the top mode
-         for comonadic axes and bottom mode for monadic axes[^0]. When this holds,
-         ['a @ m -> 'b @ n] is equivalent to ['a @@ m -> 'b @@ n].
-
-         More thoroughly: let [t @@ m] be a type whenever [t] is a type and [m] is a
-         modality, such that [t @@ m] behaves like
-         {[
-           type t_atat_m = { inner : t @@ m } [@@unboxed]
-         ]}
-         i.e. is a zero-cost modality box around the type. Note that we define [t @@ m]
-         even when [m] is a modality that does nothing; for example, [t @@ local] behaves
-         just as [t] (since the [local] modality does nothing[^1]).
-
-         Then, for all modes/modalities [m] and [n] on comonadic (resp. monadic) axes, if
-         we let [ext_m] and [ext_n] be the top (resp. bottom) mode of the corresponding
-         axes ([ext] as in "extremum"), then ['a @ m -> 'b @ n] is equivalent to
-         ['a @@ m @ ext_m -> 'b @@ n @ ext_n]. For example, ['a @ local -> 'b @ global]
-         is equivalent to ['a @@ local @ local -> 'b @@ global @ local], and (since
-         ['a @@ local] is just ['a]) also ['a @ local -> 'b @@ global @ local].
-
-         To make conflating a mode with its corresponding modality act in unsurprising
-         ways, we want ['a @ m -> 'b @ n] to be equivalent to ['a @@ m -> 'b @@ n], which
-         is implicitly ['a @@ m @ legacy_m -> 'b @@ n @ legacy_n]. This holds exactly
-         when [ext_m = legacy_m] and [ext_n = legacy_n].
-
-         Going through all of the currently supported axes:
-         {v
-            +-------------+-------------+-------------+-------------+
-            |    axis     |  direction  |   [ext_m]   |   legacy    |
-            +-------------+-------------+-------------+-------------+
-            | locality    | comonadic   | local       | global      |
-            +-------------+-------------+-------------+-------------+
-            | portability | comonadic   | nonportable | nonportable |
-            +-------------+-------------+-------------+-------------+
-            | contention  |   monadic   | uncontended | uncontended |
-            +-------------+-------------+-------------+-------------+
-            | visibility  | comonadic   | stateful    | stateful    |
-            +-------------+-------------+-------------+-------------+
-            | access      |   monadic   | read_write  | read_write  |
-            +-------------+-------------+-------------+-------------+
-            | affinity    | comonadic   | once        | many        |
-            +-------------+-------------+-------------+-------------+
-            | uniqueness  |   monadic   | unique      | aliased     |
-            +-------------+-------------+-------------+-------------+
-            | yielding    | comonadic   | yielding    | unyielding  |
-            +-------------+-------------+-------------+-------------+
-         v}
-
-         The only axes for which the right two columns align are portability and
-         contention. For this reason, we always conflate modes and modalities on these two
-         axes, and never on the other axes.
-
-         [^0] The "top" (resp. "bottom") mode of an axis is the mode which is a super-mode
-         (resp. sub-mode) of all other modes on the axis.
-
-         [^1] Each modality acts as meet (min) for comonadic axes and join (max) for
-         monadic axes; e.g. the [global] modality acts as [fun m -> meet global m].
-         This means the [local] modality acts as [fun m -> meet local m], but since
-         [local] is top for the locality axis, [meet local m = m], so [local] just
-         acts as [fun m -> m], i.e. does nothing.
-        *)
+        let* () = check_ident_shadowing env ~loc ~is_set pat value in
+        let+ (Set values) =
+          value
+          |> Value.as_expression
+          |> eval_general
+               env
+               ~loc
+               (Eval_result.Witness.expand_atoms ~is_set:(Singleton ()))
+        in
+        let entry : _ Entry.entry =
+          { ident = pat
+          ; preserve_atoms = value
+          ; expand_atoms_bound_to_sets = values
+          ; namespace = Axis.Namespace.of_value ~is_set value
+          }
+        in
         let entries : Entry.t list =
-          match pat, value with
-          | ( { type_ = Basic (Mode | Modality); ident = pat_ident }
-            , Identifier
-                { ident =
-                    ( "portable"
-                    | "nonportable"
-                    | "contended"
-                    | "shared"
-                    | "uncontended"
-                    | "stateless"
-                    | "observing"
-                    | "stateful"
-                    | "immutable"
-                    | "read"
-                    | "read_write" ) as expr_ident
-                ; type_ = _
-                } ) ->
-            [ Entry
-                ( { ident = pat_ident; type_ = Basic Mode }
-                , Identifier { ident = expr_ident; type_ = Basic Mode } )
-            ; Entry
-                ( { ident = pat_ident; type_ = Basic Modality }
-                , Identifier { ident = expr_ident; type_ = Basic Modality } )
-            ]
-          | _ -> [ Entry (pat, value) ]
+          (* See comment about conflating axes at bottom of file. *)
+          let (value :: _) = values in
+          match value with
+          | Identifier _ as value ->
+            (match Axis.Sub_axis.of_value value with
+             | Mode (Known (Mode (Portability | Contention | Visibility | Access))) ->
+               [ Entry entry; cast_entry entry Type.modality Mode ~is_set ]
+             | Modality
+                 (Known (Modality (Portability | Contention | Visibility | Access))) ->
+               [ Entry entry; cast_entry entry Type.mode Modality ~is_set ]
+             | _ -> [ Entry entry ])
+          | _ -> [ Entry entry ]
         in
         entries @ env
-      | Tuple pat_tp, Tuple value_tp -> bind_tuple env pat_tp value_tp
+      | Tuple pat_tp, Tuple value_tp -> bind_tuple ~loc ~is_set env pat_tp value_tp
       | Tuple _, _ -> .
 
-    and bind_tuple : type a. t -> a Pattern.tuple -> a Value.tuple -> t =
-      fun env pat_tp value_tp ->
+    and bind_tuple
+      : type a.
+        t
+        -> loc:location
+        -> is_set:bool
+        -> a Pattern.tuple
+        -> a Value.tuple
+        -> (t, Syntax_error.t) result
+      =
+      fun env ~loc ~is_set pat_tp value_tp ->
       match pat_tp, value_tp with
-      | [], [] -> env
+      | [], [] -> Ok env
       | pat_hd :: pat_tl, value_hd :: value_tl ->
-        bind_tuple (bind env pat_hd value_hd) pat_tl value_tl
+        let* env = bind env ~loc ~is_set pat_hd value_hd in
+        bind_tuple env ~loc ~is_set pat_tl value_tl
     ;;
 
-    let eval env { txt = expr; loc } =
-      let rec loop : type a. a Expression.t -> a Value.t = function
-        | Identifier ident as expr ->
-          (match find env ident with
-           | Some value -> value
-           | None ->
-             let typ = Expression.type_ expr in
-             (match typ with
-              | Basic (Mode | Modality | Kind) -> Identifier ident
-              | Tuple _ | Basic Alloc ->
-                let hint =
-                  match typ, ident.ident with
-                  | Basic Alloc, "heap_global" -> Some "Did you mean [heap]?"
-                  | Basic Alloc, "stack_local" -> Some "Did you mean [stack]?"
-                  | Tuple [ Basic Alloc; Basic Mode ], "heap" ->
-                    Some "Did you mean [heap_global]?"
-                  | Tuple [ Basic Alloc; Basic Mode ], "stack" ->
-                    Some "Did you mean [stack_local]?"
-                  | _ ->
-                    (match
-                       List.find_map env ~f:(fun (Entry (ident', _)) ->
-                         if String.equal ident'.ident ident.ident
-                         then Some (Type.sexp_of_t ident'.type_)
-                         else None)
-                     with
-                     | None -> None
-                     | Some type_ ->
-                       Some
-                         (Printf.sprintf
-                            "There is a template identifier [%s] in scope with type [%s]."
-                            ident.ident
-                            (Sexp.to_string type_)))
-                in
-                let hint_string =
-                  match hint with
-                  | None -> ""
-                  | Some hint -> "\nHint: " ^ hint
-                in
-                Location.raise_errorf
-                  ~loc
-                  "Unbound template identifier [%s] of type [%s].%s"
-                  ident.ident
-                  (Type.sexp_of_t typ |> Sexp.to_string_hum)
-                  hint_string))
-        | Kind_product kinds -> Kind_product (List.map kinds ~f:loop)
-        | Kind_mod (kind, mods) ->
-          Kind_mod (loop kind, List.map mods ~f:loop |> List.sort_uniq ~cmp:Value.compare)
-        | Tuple tp -> Tuple (loop_tuple tp)
-      and loop_tuple : type a. a Expression.tuple -> a Value.tuple = function
-        | [] -> []
-        | hd :: tl -> loop hd :: loop_tuple tl
+    let bind_set
+      : type a.
+        t
+        -> loc:location
+        -> a Type.basic Identifier.t
+        -> a Type.basic Value.t Nonempty_list.t
+        -> (t, Syntax_error.t) result
+      =
+      fun env ~loc ident values ->
+      let+ () =
+        (* we sample one value from the set to check *)
+        let (value :: _) = values in
+        check_ident_shadowing env ~loc ~is_set:true ident value
       in
-      loop expr
+      set_entry ident values :: env
     ;;
   end
 end
@@ -754,24 +1244,105 @@ module Type_error = struct
   include Type_error
 
   let sexp_of_t : t -> Sexp.t = function
-    | Type_mismatch { kind; sexp_of_kind; value; expected_type = type_ } ->
-      List
-        [ Atom "Type mismatch"
-        ; List [ Atom "kind"; Atom kind ]
-        ; List [ Atom "value"; sexp_of_kind value ]
-        ; List [ Atom "expected type"; Typed.Type.sexp_of_t type_ ]
-        ]
+    | Type_mismatch
+        { kind; sexp_of_kind; value; expected_type = type_; expected_sets = is_set; hint }
+      ->
+      Sexplib0.Sexp.message
+        "Type mismatch"
+        ([ "kind", Atom kind
+         ; "value", sexp_of_kind value
+         ; "expected type", Typed.Type.sexp_of_t type_
+         ]
+         @ (match is_set with
+            | Some is_set -> [ "expected sets", Typed.Expression.sexp_of_sets is_set ]
+            | None -> [])
+         @
+         match hint with
+         | Some hint -> [ "hint", Atom hint ]
+         | None -> [])
     | Tuple_length_mismatch { kind; sexp_of_kind; value; expected_type = type_ } ->
-      List
-        [ Atom "Tuple length mismatch"
-        ; List [ Atom "kind"; Atom kind ]
-        ; List [ Atom "value"; sexp_of_kind value ]
-        ; List [ Atom "expected type"; Typed.Type.sexp_of_t type_ ]
+      Sexplib0.Sexp.message
+        "Tuple length mismatch"
+        [ "kind", Atom kind
+        ; "value", sexp_of_kind value
+        ; "expected type", Typed.Type.sexp_of_t type_
         ]
   ;;
 
-  let lift_to_error_result = function
+  let to_error ~loc t =
+    Syntax_error.createf
+      ~loc
+      "%s"
+      (Sexp.to_string_hum (List [ Atom "[%template]"; sexp_of_t t ]))
+  ;;
+
+  let lift_to_error_result ~loc = function
     | Ok _ as ok -> ok
-    | Error type_error -> Error (sexp_of_t type_error)
+    | Error type_error -> Error (to_error ~loc type_error)
   ;;
 end
+
+(* Note about conflating axes (e.g. in [Env.bind]):
+
+   We always conflate modes and modalities for the portability and contention axes.
+   These axes have the property that the legacy mode coincides with the top mode
+   for comonadic axes and bottom mode for monadic axes[^0]. When this holds,
+   ['a @ m -> 'b @ n] is equivalent to ['a @@ m -> 'b @@ n].
+
+   More thoroughly: let [t @@ m] be a type whenever [t] is a type and [m] is a
+   modality, such that [t @@ m] behaves like
+   {[
+     type t_atat_m = { inner : t @@ m } [@@unboxed]
+   ]}
+   i.e. is a zero-cost modality box around the type. Note that we define [t @@ m]
+   even when [m] is a modality that does nothing; for example, [t @@ local] behaves
+   just as [t] (since the [local] modality does nothing[^1]).
+
+   Then, for all modes/modalities [m] and [n] on comonadic (resp. monadic) axes, if
+   we let [ext_m] and [ext_n] be the top (resp. bottom) mode of the corresponding
+   axes ([ext] as in "extremum"), then ['a @ m -> 'b @ n] is equivalent to
+   ['a @@ m @ ext_m -> 'b @@ n @ ext_n]. For example, ['a @ local -> 'b @ global]
+   is equivalent to ['a @@ local @ local -> 'b @@ global @ local], and (since
+   ['a @@ local] is just ['a]) also ['a @ local -> 'b @@ global @ local].
+
+   To make conflating a mode with its corresponding modality act in unsurprising
+   ways, we want ['a @ m -> 'b @ n] to be equivalent to ['a @@ m -> 'b @@ n], which
+   is implicitly ['a @@ m @ legacy_m -> 'b @@ n @ legacy_n]. This holds exactly
+   when [ext_m = legacy_m] and [ext_n = legacy_n].
+
+   Going through all of the currently supported axes:
+   {v
+      +-------------+-------------+-------------+-------------+
+      |    axis     |  direction  |   [ext_m]   |   legacy    |
+      +-------------+-------------+-------------+-------------+
+      | locality    | comonadic   | local       | global      |
+      +-------------+-------------+-------------+-------------+
+      | portability | comonadic   | nonportable | nonportable |
+      +-------------+-------------+-------------+-------------+
+      | contention  |   monadic   | uncontended | uncontended |
+      +-------------+-------------+-------------+-------------+
+      | visibility  | comonadic   | stateful    | stateful    |
+      +-------------+-------------+-------------+-------------+
+      | access      |   monadic   | read_write  | read_write  |
+      +-------------+-------------+-------------+-------------+
+      | affinity    | comonadic   | once        | many        |
+      +-------------+-------------+-------------+-------------+
+      | uniqueness  |   monadic   | unique      | aliased     |
+      +-------------+-------------+-------------+-------------+
+      | yielding    | comonadic   | yielding    | unyielding  |
+      +-------------+-------------+-------------+-------------+
+   v}
+
+   The only axes for which the right two columns align are portability and
+   contention. For this reason, we always conflate modes and modalities on these two
+   axes, and never on the other axes.
+
+   [^0] The "top" (resp. "bottom") mode of an axis is the mode which is a super-mode
+   (resp. sub-mode) of all other modes on the axis.
+
+   [^1] Each modality acts as meet (min) for comonadic axes and join (max) for
+   monadic axes; e.g. the [global] modality acts as [fun m -> meet global m].
+   This means the [local] modality acts as [fun m -> meet local m], but since
+   [local] is top for the locality axis, [meet local m = m], so [local] just
+   acts as [fun m -> m], i.e. does nothing.
+*)

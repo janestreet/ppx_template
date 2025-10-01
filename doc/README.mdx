@@ -168,11 +168,14 @@ for details.
 
 ## Attributes
 
-Attached poly-attributes (`[@@kind ...]`, `[@@mode ...]`, `[@@modality ...]`, and `[@@alloc ...]`)
-can appear on structure/signature items; these attributes produce multiple copies of the attached
-template item, updating each instance's AST based on the specified bindings. Additionally, these
-attributes mangle the instance's name (e.g. function name or module name) based on the requested
-bindings so that the desired template instance can be picked out by name (see [below](#mangling)):
+### Poly
+
+Attached poly-attributes (`[@@kind ...]`, `[@@kind_set ...]`, `[@@mode ...]`,
+`[@@modality ...]`, and `[@@alloc ...]`) can appear on structure/signature items; these
+attributes produce multiple copies of the attached template item, updating each instance's
+AST based on the specified bindings. Additionally, these attributes mangle the instance's
+name (e.g. function name or module name) based on the requested bindings so that the
+desired template instance can be picked out by name (see [below](#mangling)):
 
 ```ocaml
 module%template T_templated : sig
@@ -206,6 +209,9 @@ act as their corresponding attached poly-attributes, templating all subsequent i
 same (shallow) lexical scope. The `.default` modifier controls whether name mangling happens
 (no mangling when omitted, mangling when present). You generally *always* want to use
 `.default`, and we intend to make that the default behavior in the future.
+
+<details>
+<summary>Expand example</summary>
 
 ```ocaml
 module%template T_floating_default = struct
@@ -312,13 +318,33 @@ module T_expanded = struct
   let unwrap__bits64__portable ({ x } @ portable) = x
 end
 ```
+</details>
 
-Mono-attributes (`[@kind ...]`, `[@mode ...]`, `[@modality ...]`, and `[@alloc ...]`)
-can appear attached to identifiers in expression, type, module expression, and module type
-positions. Mono-attributes have the effect of mangling the attached identifier to the name
-corresponding to the requested template instance. This helps with readability, as well as
-avoiding dependence on the particular mangling mechanism `ppx_template` uses as this can change
-in the future.
+Though the right hand side of poly bindings is most often a list of
+singleton expressions, it can actually be any ppx\_template expression
+that evaluates to a set. For example:
+
+```ocaml
+# let%template id (x : (_ : k)) = x [@@kind k = (value, value & (value, bits64))]
+val id : 'a -> 'a = <fun>
+val id__'value_value' : ('a : value & value). 'a -> 'a = <fun>
+val id__'value_bits64' : ('a : value & bits64). 'a -> 'a = <fun>
+```
+
+Here, the set `(value, value & (value, bits64))` evaluates to the set
+`(value, value & value, value & bits64)`, and so we get three versions of `id`.
+
+For more information about the semantics of sets in kind expressions, see
+[kind sets](#kind-sets).
+
+### Mono
+
+Mono-attributes (`[@kind ...]`, `[@kind_set ...]`, `[@mode ...]`, `[@modality ...]`, and
+`[@alloc ...]`) can appear attached to identifiers in expression, type, module expression,
+and module type positions. Mono-attributes have the effect of mangling the attached
+identifier to the name corresponding to the requested template instance. This helps with
+readability, as well as avoiding dependence on the particular mangling mechanism
+`ppx_template` uses as this can change in the future.
 
 ```ocaml
 let%template flip (type (a : k) (b : k) (c : k)) (f : (a -> b -> c) @ p) = fun x y -> f y x
@@ -330,6 +356,152 @@ let my_flip (f : t -> t -> t) = (flip [@mode portable] [@kind bits32]) f
 ```
 
 Notice that the mono-attributes are not required to be within a `%template` node.
+
+### Define
+
+Define-attributes (currently only `[@@@kind_set.define]`) can be used
+to introduce a name for a first-class set of the underlying value.
+This name can then be used in e.g. `[@@kind_set]` poly and mono
+attributes and on the right hand side of `[@@kind]` poly attributes.
+
+For example:
+```ocaml
+# [%%template
+  [@@@kind_set.define all = (value, value & (bits64, bits32))]
+
+  module [@kind_set ks = (value, all)] T1 = struct
+    type ('a : k) t [@@kind k = ks]
+  end]
+module T1 : sig type 'a t end
+module T1__''all'' :
+  sig
+    type 'a t
+    and ('a : value & bits64) t__'value_bits64'
+    and ('a : value & bits32) t__'value_bits32'
+  end
+```
+
+The bound name is only available in the current lexical scope. It
+can't be re-used in a manner that inspects its contents in a different
+`%template` block or in a different file.
+
+```ocaml
+# let%template id (x : (_ : k)) = x [@@kind k = all]
+Line 1, characters 27-28:
+Error: Unknown layout all
+```
+
+However, that name can (and should) still be used in `mono` attributes
+to reference identifiers templated over kind sets, even in other files.
+
+```ocaml
+# module T1' = struct
+    include T1 [@kind_set all]
+  end
+module T1' :
+  sig
+    type 'a t = 'a T1__''all''.t
+    and ('a : value & bits64) t__'value_bits64' =
+        'a T1__''all''.t__'value_bits64'
+    and ('a : value & bits32) t__'value_bits32' =
+        'a T1__''all''.t__'value_bits32'
+  end
+```
+
+The reason for this is that the mangling scheme for sets mangles
+identifiers using the names of relevant sets, and not canonical
+representations of their contents. In fact, attempting to monomorphize
+by an explicit set produces an error:
+
+```ocaml
+# module T1' = struct
+    include T1 [@kind_set (value, value & (bits64, bits32))]
+  end
+Line 2, characters 27-60:
+Error: ([%template]
+        ("Type mismatch" (kind expression)
+         (value
+          (Comma_separated value (Product value (Comma_separated bits64
+       bits32))))
+         ("expected type" Kind) ("expected sets" singleton)
+         (hint "unions not allowed in mono attributes")))
+```
+
+### With
+
+The `[@with: ...]` attribute can be attached to module types to leverage familiar
+`ppx_template` features for generating families of `with` constraints.
+
+
+Consider the module type
+
+```ocaml
+module type%template S = sig
+  module Elt : sig
+    type ('a : k) t : k [@@kind k = base]
+  end
+
+  [@@@kind.default k = base]
+
+  type ('a : k, 'b : any) t_with_phantom
+
+  val singleton
+    : ('a : k).
+    ('a Elt.t[@kind k]) -> (('a, 'b) t_with_phantom[@kind k])
+end
+```
+
+Suppose we wish to bind `('a, _) t_with_phantom` with the corresponding `'a List.t`
+for all `k`s and substitute `'a Elt.t` with `'a`. `[@with:]` lets us write:
+
+```ocaml
+# module type S' = S
+  [@with:
+    type ('a : k, 'b : any) t_with_phantom = ('a List.t[@kind k])
+    [@@kind k = base]
+
+    module Elt : sig
+      type ('a : k) t := 'a [@@kind k = base]
+    end]
+module type S' =
+  sig
+    module Elt : sig end
+    type ('a : bits64, 'b : any) t_with_phantom__bits64 = 'a List.t__bits64
+    val singleton__bits64 : ('a : bits64) 'b. 'a -> 'a List.t__bits64
+    type ('a : bits32, 'b : any) t_with_phantom__bits32 = 'a List.t__bits32
+    val singleton__bits32 : ('a : bits32) 'b. 'a -> 'a List.t__bits32
+    type ('a : word, 'b : any) t_with_phantom__word = 'a List.t__word
+    val singleton__word : ('a : word) 'b. 'a -> 'a List.t__word
+    type ('a : float64, 'b : any) t_with_phantom__float64 =
+        'a List.t__float64
+    val singleton__float64 : ('a : float64) 'b. 'a -> 'a List.t__float64
+    type ('a : float32, 'b : any) t_with_phantom__float32 =
+        'a List.t__float32
+    val singleton__float32 : ('a : float32) 'b. 'a -> 'a List.t__float32
+    type ('a, 'b : any) t_with_phantom = 'a list
+    val singleton : 'a -> 'a list
+  end
+```
+
+Note that the `type ('a : k) t := 'a` inside `module Elt : sig ... end` becomes a
+`with type ('a : k) Elt.t := 'a` constraint.
+
+Module and module type bindings and substitutions inside `[@with:]`
+similarly turn into the corresponding signature constraints.
+
+Other signature items present in a `[@with:]` have no
+constraint-related meaning and result in an error:
+
+```ocaml
+module type S' = S [@with: val singleton : unit [@@kind k = base]]
+```
+```mdx-error
+Line 1, characters 28-66:
+Error: Invalid [@template.with] payload:
+       signature can only contain type, module, and module type bindings
+```
+
+### Misc
 
 The `[@@alloc ...]` poly-attributes have some additional supported syntax, and there are a few
 other attributes that interact with particular axes (`[@exclave_if_local ...]`,
@@ -406,53 +578,6 @@ module%template T_expanded = struct
 end
 ```
 
-### Grammar
-
-Helper grammars:
-```
-tuple<x> ::=
-| "(" x ("," x)+ ")"
-| "(" x "@" x ")"
-
-identifier ::= (valid ocaml variable identifier)
-```
-
-Grammar of poly-attribute payloads:
-```
-# e.g. let f x = x [@@kind k1 = bits32, k2 = (value, bits32)] [@@mode local local]
-poly ::= simple-bindings | punned-bindings
-
-simple-bindings ::= nil | simple-binding ("," simple-binding)*
-
-simple-binding ::= pattern "=" expressions
-
-punned-bindings ::= expression*
-```
-
-Grammar of mono-attribute payloads:
-```
-# e.g. let x = (f [@kind value bits32])
-mono ::= expression*
-```
-
-Patterns:
-```
-pattern ::=
-| identifier
-| tuple<identifier>
-```
-
-Expressions:
-```
-expressions ::= expression | "(" expression ("," expression)+ ")"
-
-expression ::=
-| identifier
-| expression ("&" expression)+
-| expression "mod" expression+
-| tuple<expression>
-```
-
 # Axes
 
 Templating acts on a few different axes; each supported axis is designed around some future
@@ -476,6 +601,94 @@ The currently supported shapes of kinds are:
 
 Kind-abbreviations can be other kind-template variables, and mode-modifiers can be other
 modality-template variables.
+
+### Kind sets
+
+The `[@@kind_set ...]` and related attributes are further useful for
+defining and operating on sets of kinds, especially in the context of
+similar interfaces that care about different universes of kinds.
+Consider the following simple interface:
+
+```ocaml
+module type Monad = sig
+  type 'a t
+
+  val return : 'a -> 'a t
+  val bind : 'a t -> ('a -> 'b t) -> 'b t
+end
+```
+
+Now suppose we wish to make a version of `Monad` that supports both
+`value` and `bits64` elements. We can write:
+```ocaml
+# [%%template
+  [@@@kind_set.define all = (value, bits64)]
+
+  module type [@kind_set ks = (value, all)] Monad = sig
+    [%%template:
+    [@@@kind.default k = ks]
+
+    type ('a : k) t
+
+    val return : ('a : k). 'a -> ('a t[@kind k])]
+
+    val bind
+      : ('a : ka) ('b : kb).
+      ('a t[@kind ka]) -> ('a -> ('b t[@kind kb])) -> ('b t[@kind kb])
+    [@@kind ka = ks, kb = ks]
+  end]
+module type Monad =
+  sig
+    type 'a t
+    val return : 'a -> 'a t
+    val bind : 'a t -> ('a -> 'b t) -> 'b t
+  end
+module type Monad__''all'' =
+  sig
+    type 'a t
+    val return : 'a -> 'a t
+    type ('a : bits64) t__bits64
+    val return__bits64 : ('a : bits64). 'a -> 'a t__bits64
+    val bind : 'a t -> ('a -> 'b t) -> 'b t
+    val bind__value__bits64 :
+      'a ('b : bits64). 'a t -> ('a -> 'b t__bits64) -> 'b t__bits64
+    val bind__bits64__value :
+      ('a : bits64) 'b. 'a t__bits64 -> ('a -> 'b t) -> 'b t
+    val bind__bits64__bits64 :
+      ('a : bits64) ('b : bits64).
+        'a t__bits64 -> ('a -> 'b t__bits64) -> 'b t__bits64
+  end
+```
+
+This gives us both our regular `Monad` interface, and a new `Monad
+[@kind_set all]` interface that we can use for monads additionally
+supporting `bits64`.
+
+In kind set expressions, kind sets are allowed anywhere kinds are (in
+fact, kinds are just treated as implicit singleton sets).
+
+* union: `,` acts as a union, so `[@@kind k = (value, (bits64, bits32))]`
+  is the same as `[@@kind k = (value, bits64, bits32)]`. The kinds like
+  `value` are implicitly treated as singleton sets.
+* kind-products: `&` distributes over both arguments, so e.g.
+  `[@@kind k = ((value, bits64) & (bits32, word))]` is the same as
+  `[@@kind k = (value & bits32, value & word, bits64 & bits32, bits64 & word)]`.
+* mode-modifiers: `mod` distributs over the kind argument, so e.g.
+  `[@@kind k = (value, bits64) mod global]` is the same as
+  `[@@kind k = (value mod global, bits64 mod global)]`.
+
+The following named kind sets are included in the initial scope:
+
+* `base_non_value = (bits64, bits32, word, float64, float32)`
+* `value_with_imm = (value, immediate, immediate64)`
+* `value_or_null_with_imm = (value_or_null, immediate, immediate64)`
+* `base = (base_non_value, value)`
+* `base_with_imm = (base_non_value, value_with_imm)`
+* `base_or_null = (base_non_value, value_or_null)`
+* `base_or_null_with_imm = (base_non_value, value_or_null_with_imm)`
+
+For more on defining custom named kind sets, see the section on the
+[define attribute](#define).
 
 ## Mode polymorphism
 
@@ -546,10 +759,9 @@ let%template rec map : f:('a -> 'b @ m) -> 'a list -> 'b list @ m =
 ```
 ```mdx-error
 Lines 3-5, characters 5-50:
-Error: ([%template]
-        "exclave_if_local is only allowed on tailcalls or syntactic
-       allocations (e.g. tuples) consisting entirely of identifiers, record
-       fields, and/or constants")
+Error: [%template]: exclave_if_local is only allowed on tailcalls or
+       syntactic allocations (e.g. tuples) consisting entirely of
+       identifiers, record fields, and/or constants
 ```
 
 Instead, you can use alloc polymorphism:
@@ -632,6 +844,90 @@ module _ = Delay [@mode portable]
 
 For axis (besides `alloc`), the pattern and expressions can both be either elements of that axis, or a tuple
 of elements of that axis. We do not support nested tuples.
+
+## Aliasing across axes
+
+In general, using the same template identifier to refer to values from two different
+template axes is a footgun. For this reason, we explicitly error when attempting to bind a
+value to an identifier if that identifier is already bound in the environment to a value
+from a different namespace. These errors can also help spot other accidental mis-uses:
+
+```ocaml
+[%%template
+[@@@alloc m @ a = heap_global]
+
+let id (x @ m) = x [@@mode m = (local, m)]]
+```
+```mdx-error
+Line 4, characters 30-44:
+Error: shadowing variables from a different namespace is prohibited
+       attempting to bind
+         identifier 'm'
+         in namespace '(Mode Locality)'
+       but it is already bound
+         in namespace 'Alloc'
+         to the value 'heap'
+         and when fully expanded '(heap)'
+```
+
+Each axis above broadly gets its own namespace, with a few caveats:
+
+* Sets and singletons occupy different namespaces; so for example,
+  using `k` to refer both to a set of kinds and to its elements will
+  produce an error
+```ocaml
+[%%template
+[@@@kind_set k = base]
+[@@@kind.default k = k]
+
+let id (x : (_ : k)) = x]
+```
+```mdx-error
+Line 3, characters 20-25:
+Error: shadowing variables from a different namespace is prohibited
+       attempting to bind
+         identifier 'k'
+         in namespace 'Kind'
+       but it is already bound
+         in namespace '(Set Kind)'
+         to the value 'base'
+         and when fully expanded '(bits64 bits32 word float64 float32 value)'
+```
+
+* Each modal sub-axis gets its own namespace; so for example, using `m`
+  for both locality-related modes and portability-related modes in the
+  same scope will produce an error
+```ocaml
+[%%template
+[@@@mode m = (global, local)]
+[@@@mode.default m = (portable, nonportable)]
+
+let id (x @ m) = x]
+```
+```mdx-error
+Line 3, characters 20-47:
+Error: shadowing variables from a different namespace is prohibited
+       attempting to bind
+         identifier 'm'
+         in namespace '(Mode Portability)'
+       but it is already bound
+         in namespace '(Mode Locality)'
+         to the value 'global'
+         and when fully expanded '(global)'
+```
+
+* However, we permit aliasing between modes and modalities that are on the
+  same modal axis. This is important, among other things, for the
+  `[%template.portable]` extension described [below](#template-portable).
+```ocaml
+# [%%template
+  [@@@modality m = (portable, nonportable)]
+  [@@@mode.default m]
+
+  let id (x @ m) @ m = x]
+val id__portable : 'a @ portable -> 'a @ portable = <fun>
+val id : 'a -> 'a = <fun>
+```
 
 # The [%template.portable] extension {#template-portable}
 
@@ -861,6 +1157,196 @@ when ranging over multiple kinds:
 
 ```ocaml
 let%template[@kind k = (value, float64)] f (type (a : k)) (x : a) : a = x
+```
+
+# Expert
+
+The following features are available for specific uses in common libraries, but are
+currently not considered sufficiently mature or principled for broader use. Consult a
+common libs dev if you feel yourself reaching for one of these features.
+
+
+## `default_if_multiple`
+
+
+We sometimes template an interface in a way that uses `ppx_template` to simulate two
+similar planned compiler features:
+
+- abstract kinds: the interface is instantiated by several modules, each of which is
+  monomorphic with respect to some kind `k`, but those `k`s can be different between each
+  other.
+- kind polymorphism: the interface is instantiated by modules where each module supports
+  every operation for each of several kinds.
+
+Consider again the `Monad` interface we templated over [kind sets](#kind-sets). Here is
+the original untemplated version:
+
+```ocaml
+module type Monad = sig
+  type 'a t
+
+  val return : 'a -> 'a t
+  val bind : 'a t -> ('a -> 'b t) -> 'b t
+end
+```
+
+Now, suppose that in addition to creating a version of the interface whose implementations
+support operations on _both_ `value` and `bits64` types, we wished to also add a version
+of the interface for monads that only support `bits64` types. We might be inclined to
+write, as before:
+
+```ocaml
+[%%template
+  [@@@kind_set.define all = (value, bits64)]
+
+  module type [@kind_set ks = (value, bits64, all)] Monad = sig
+    [%%template:
+    [@@@kind.default k = ks]
+
+    type ('a : k) t
+
+    val return : ('a : k). 'a -> ('a t[@kind k])]
+
+    val bind
+      : ('a : ka) ('b : kb).
+      ('a t[@kind ka]) -> ('a -> ('b t[@kind kb])) -> ('b t[@kind kb])
+    [@@kind ka = ks, kb = ks]
+  end]
+```
+
+But now every function in the `bits64` version of the interface requires templating:
+
+```ocaml
+module Opt64 : Monad [@kind_set bits64] = struct
+  type ('a : bits64) t =
+    | Some of 'a
+    | None
+
+  let return x = Some x
+
+  let bind x f =
+    match x with
+    | Some x -> f x
+    | None -> None
+end
+```
+```mdx-error
+Lines 1-12, characters 43-6:
+Error: Signature mismatch:
+       Modules do not match:
+         sig
+           type ('a : bits64) t = Some of 'a | None
+           val return : ('a : bits64). 'a -> 'a t
+           val bind :
+             ('a : bits64) ('b : bits64). 'a t -> ('a -> 'b t) -> 'b t
+         end
+       is not included in
+         Monad__''bits64''
+       The type t__bits64 is required but not provided
+       The value return__bits64 is required but not provided
+       The value bind__bits64__bits64 is required but not provided
+```
+
+If we did change our implementation to satisfy `Monad [@kind_set64]`, clients would need
+to refer to `bind` as `bind [@kind bits64 bits64]`, even though there is only one `bind`
+function.
+
+As a workaround for cases like these, we support a floating attribute
+`[@@@kind.default_if_multiple]`. This attribute behaves
+
+- like `[@@@kind.default]` when the RHS of the binding contains several kinds (indicating
+  that `ppx_template` is here imitating kind polymorphism and we plan to generate several
+  versions of each function with different mangled names)
+- like `[@@@kind]` when the RHS of the binding contains just one kind (indicating that
+  `ppx_template` is here imitating an abstract kind, and we plan to generate just one
+  version of each function without needing to mangle).
+
+Notice that this approach makes it difficult to generically refer back to a previous item
+`v` that was (possibly) templated via `default_if_multiple`. This is because, if `ks` has
+multiple elements, the item we want is invoked `v [@kind k]`, and if `ks` has just one
+element, it is invoked `v` (and `v [@kind k]` for `k <> value` will mangle to the wrong
+identifier). Fortunately, this restriction is not so limiting because:
+
+- it is not possible to refer to a previous `val` in a signature
+- `type`s can be destructively substituted by eventual concrete clients later using
+  [polymorphic with](#with), so it's fine to use the conventional always-mangling
+  attributes (even if we would ultimately like to end up with unmangled types in some
+  cases).
+
+As an example we can write:
+
+```ocaml
+# [%%template
+    [@@@kind_set.define all = (value, bits64)]
+
+    module type [@kind_set ks = (value, bits64, all)] Monad = sig
+      type ('a : k) t [@@kind k = ks]
+
+      [@@@kind.default_if_multiple ka = ks]
+
+      val return : ('a : ka). 'a -> ('a t[@kind ka])
+
+      [@@@kind.default_if_multiple kb = ks]
+
+      val bind
+        : ('a : ka) ('b : kb).
+        ('a t[@kind ka]) -> ('a -> ('b t[@kind kb])) -> ('b t[@kind kb])
+    end]
+module type Monad =
+  sig
+    type 'a t
+    val return : 'a -> 'a t
+    val bind : 'a t -> ('a -> 'b t) -> 'b t
+  end
+module type Monad__''bits64'' =
+  sig
+    type ('a : bits64) t__bits64
+    val return : ('a : bits64). 'a -> 'a t__bits64
+    val bind :
+      ('a : bits64) ('b : bits64).
+        'a t__bits64 -> ('a -> 'b t__bits64) -> 'b t__bits64
+  end
+module type Monad__''all'' =
+  sig
+    type 'a t
+    and ('a : bits64) t__bits64
+    val return : 'a -> 'a t
+    val bind : 'a t -> ('a -> 'b t) -> 'b t
+    val bind__value__bits64 :
+      'a ('b : bits64). 'a t -> ('a -> 'b t__bits64) -> 'b t__bits64
+    val return__bits64 : ('a : bits64). 'a -> 'a t__bits64
+    val bind__bits64__value :
+      ('a : bits64) 'b. 'a t__bits64 -> ('a -> 'b t) -> 'b t
+    val bind__bits64__bits64 :
+      ('a : bits64) ('b : bits64).
+        'a t__bits64 -> ('a -> 'b t__bits64) -> 'b t__bits64
+  end
+```
+
+Now we can implement a `bits64` monad without needing to mangle any of the function names.
+Note the destructive substitution of `t [@kind bits64]` to replace it with the more
+desirable `t`.
+
+```ocaml
+module Opt64 : sig
+  [%%template:
+  [@@@kind k = bits64]
+
+  type ('a : k) t
+
+  include Monad [@kind_set k] [@with: type ('a : k) t := 'a t [@@kind k]]]
+end = struct
+  type ('a : bits64) t =
+    | Some of 'a
+    | None
+
+  let return x = Some x
+
+  let bind x f =
+    match x with
+    | Some x -> f x
+    | None -> None
+end
 ```
 
 # Further examples

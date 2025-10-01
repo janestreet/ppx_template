@@ -76,14 +76,17 @@ let () =
 let check_if_bare_attributes_allowed ~loc =
   if !require_template_extension
   then
-    Location.raise_errorf
-      ~loc
-      "ppx_template: [%%template] extension is required to interpret attribute due to %s \
-       flag"
-      require_template_extension_flag
+    Error
+      (Syntax_error.createf
+         ~loc
+         "ppx_template: [%%template] extension is required to interpret attribute due to \
+          %s flag"
+         require_template_extension_flag)
+  else Ok ()
 ;;
 
 let mono_attrs = []
+let with_attr = []
 
 (* Piggyback on ppxlib's ability to inline structure items. *)
 let inline_structure =
@@ -116,7 +119,7 @@ let () =
       ; inline_structure
       ; inline_signature
       ]
-    ~rules:mono_attrs
+    ~rules:(with_attr @ mono_attrs)
 ;;
 
 let declare_portable_stateless_extensions context pattern f =
@@ -161,3 +164,5 @@ let () =
     "@template.portable"
     ~extensions:(module_bindings @ module_declarations)
 ;;
+
+let registered = ()

@@ -9,6 +9,7 @@ open Ast_pattern
 type ('a, 'node) pat = { pat : 'b. unit -> ('node, 'a -> 'b, 'b) Ast_pattern.t }
 [@@unboxed]
 
+let loc1 pat = map1' pat ~f:(fun loc a -> { txt = a; loc })
 let map_pat { pat } ~f = { pat = (fun () -> map1 (pat ()) ~f) }
 let at_most_one_pattern p = p ^:: nil ||| map0 nil ~f:[]
 let at_most_one_eval p = pstr (at_most_one_pattern (pstr_eval p nil))
@@ -23,17 +24,25 @@ let ident' =
                (* This helps break parsing ambiguity between punning and alternate forms
                   of alloc-poly (otherwise, [[@@alloc a = heap]] can be parsed as a punned
                   binding with the identifiers [( = )], [a], and [heap]). *)
-               Ppxlib__.Ast_pattern0.fail loc ("Invalid ppx_template identifier: " ^ ident)
+               Ast_pattern.fail loc ("Invalid ppx_template identifier: " ^ ident)
              | _ -> { txt = { Identifier.ident }; loc })))
   }
 ;;
 
+let pexp_tuple p =
+  map1
+    (pexp_tuple (many p))
+    ~f:(function
+      | [] | [ _ ] ->
+        failwith "parsetree invariant violated: tuples have at least two elements"
+      | hd :: (_ :: _ as tl) -> (hd :: tl : _ Nonempty_list.t))
+;;
+
 let ident = map_pat ident' ~f:Loc.txt
 let ident_pattern = map_pat ident ~f:(fun ident -> Pattern.Identifier ident)
-let ident_expr = map_pat ident' ~f:(Loc.map ~f:(fun ident -> Expression.Identifier ident))
 let one_or_many a b = map1 a ~f:(fun x -> [ x ]) ||| b
-let tuple_or_one p = pexp_tuple (many p) ||| map1 p ~f:(fun x -> [ x ])
-let one_or_tuple p = one_or_many p (pexp_tuple (many p))
+let tuple_or_one p = pexp_tuple p ||| map1 p ~f:(fun x : _ Nonempty_list.t -> [ x ])
+let one_or_tuple p = map1 p ~f:(fun x : _ Nonempty_list.t -> [ x ]) ||| pexp_tuple p
 
 let one_or_many_as_list { pat } =
   one_or_many
@@ -52,15 +61,15 @@ let alloc_pattern =
 ;;
 
 let expr =
-  let report_syntax_error ~loc fmt =
-    Location.raise_errorf ~loc (Stdlib.( ^^ ) "[ppx_template] syntax error: " fmt)
+  let expected ~loc message =
+    (* Error message automatically has " expected" appended to the end *)
+    Ast_pattern.fail loc ("[ppx_template] syntax error: " ^ message)
   in
   let rec of_expr : expression -> Expression.t =
     fun ({ pexp_desc; pexp_loc = loc; pexp_attributes; pexp_loc_stack = _ } as expr) ->
     let () =
       match pexp_attributes with
-      | attr :: _ ->
-        report_syntax_error ~loc:attr.attr_loc "attributes are not allowed here"
+      | attr :: _ -> expected ~loc:attr.attr_loc "no attributes"
       | [] -> ()
     in
     match expr, Ppxlib_jane.Shim.Expression_desc.of_parsetree ~loc pexp_desc with
@@ -74,12 +83,12 @@ let expr =
              kinds, we need to cheat and parse [a & b & c === a & (b & c)] as a flat
              kind. *)
           rhs
-        | (Tuple _ | Identifier _ | Kind_mod _) as rhs -> [ rhs ]
+        | (Comma_separated _ | Identifier _ | Kind_mod _) as rhs -> [ rhs ]
       in
-      Kind_product (lhs :: rhs)
+      Kind_product (lhs :: Nonempty_list.to_list rhs)
     | [%expr [%e? base] mod [%e? modifiers_exp]], _ ->
       let base = of_expr base in
-      let modifier_exps =
+      let modifier_exps : _ Nonempty_list.t =
         match modifiers_exp with
         | { pexp_desc = Pexp_apply (modifiers_hd, modifiers_tl); _ } ->
           let modifiers_tl =
@@ -87,25 +96,26 @@ let expr =
               match label with
               | Nolabel -> modifier
               | Labelled _ | Optional _ ->
-                report_syntax_error
-                  ~loc:modifier.pexp_loc
-                  "unexpected label on kind modifier")
+                expected ~loc:modifier.pexp_loc "unlabeled kind modifier")
           in
           modifiers_hd :: modifiers_tl
         | modifiers_hd -> [ modifiers_hd ]
       in
-      let modifiers = List.map modifier_exps ~f:of_expr in
+      let modifiers = Nonempty_list.map modifier_exps ~f:of_expr in
       Kind_mod (base, modifiers)
-    | [%expr [%e? lhs] @ [%e? rhs]], _ -> Tuple [ of_expr lhs; of_expr rhs ]
+    | [%expr [%e? lhs] @ [%e? rhs]], _ -> Comma_separated [ of_expr lhs; of_expr rhs ]
     | _, Pexp_tuple lab_exprs ->
-      Tuple
-        (List.map lab_exprs ~f:(function
-          | Some _label, { pexp_loc = loc; _ } ->
-            report_syntax_error ~loc "unexpected label on tuple element"
-          | None, expr -> of_expr expr))
-    | _, Pexp_construct _ ->
-      report_syntax_error ~loc "constructors are not allowed in template expressions"
-    | _ -> report_syntax_error ~loc "invalid syntax"
+      Comma_separated
+        (lab_exprs
+         |> (function
+               | [] | _ :: [] ->
+                 failwith "parsetree invariant: tuples must have at least two elements"
+               | hd :: (_ :: _ as tl) -> (hd :: tl : _ Nonempty_list.t))
+         |> Nonempty_list.map ~f:(function
+           | Some _label, { pexp_loc = loc; _ } -> expected ~loc "unlabeled tuple element"
+           | None, expr -> of_expr expr))
+    | _, Pexp_construct _ -> expected ~loc "no constructors in template expressions"
+    | _ -> expected ~loc "kind expression"
   in
   { pat =
       (fun () ->
@@ -119,7 +129,7 @@ let pattern =
       (fun () ->
         one_or_tuple (ident_pattern.pat ())
         |> map1 ~f:(function
-          | [ pat ] -> pat
+          | ([ pat ] : _ Nonempty_list.t) -> pat
           | pats -> Pattern.Tuple pats)
         ||| alloc_pattern.pat ())
   }
@@ -143,13 +153,32 @@ let punned_binding =
   map_pat expr ~f:(fun expr ->
     let ident = Ppxlib.gen_symbol ~prefix:"binding" () in
     let pattern = Pattern.Identifier { ident } in
-    pattern, [ expr ])
+    pattern, ([ expr ] : _ Nonempty_list.t))
 ;;
 
-let single_ident () = pstr (pstr_eval (ident_expr.pat ()) nil ^:: nil)
-let ident_expr () = ident_expr.pat ()
+let single_ident () = pstr (pstr_eval (expr.pat ()) nil ^:: nil)
+let ident_expr () = expr.pat ()
 let multiple_idents () = expr |> one_or_many_as_list |> at_most_one_eval
 
 let bindings () =
-  one_or_tuple (binding.pat ()) ||| one_or_many_as_list punned_binding |> at_most_one_eval
+  map1 (one_or_tuple (loc1 (binding.pat ()))) ~f:Nonempty_list.to_list
+  ||| ({ pat = (fun () -> loc1 (punned_binding.pat ())) } |> one_or_many_as_list)
+  |> at_most_one_eval
+;;
+
+let set_bindings () =
+  let set_binding =
+    { pat =
+        (fun () ->
+          pexp_apply
+            (pexp_ident (lident (string "=")))
+            (pair nolabel (pattern.pat ()) ^:: pair nolabel (expr.pat ()) ^:: nil)
+          |> pack2)
+    }
+  in
+  set_binding.pat ()
+  |> loc1
+  |> one_or_tuple
+  |> map1 ~f:Nonempty_list.to_list
+  |> at_most_one_eval
 ;;

@@ -1,1 +1,1 @@
-(*_ This file is intentionally left empty. *)
+(*_ This signature is deliberately empty. *)

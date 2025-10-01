@@ -16,4 +16,9 @@ val multiple_idents : (Expression.t loc list, payload, _) pattern
 
 (** A list of bindings, as in
     [[@@mode m1 = (local, global), m2 = (nonportable, portable)]] *)
-val bindings : ((Pattern.t * Expression.t Loc.t list) list, payload, _) pattern
+val bindings
+  : ((Pattern.t * Expression.t Loc.t Nonempty_list.t) Loc.t list, payload, _) pattern
+
+(** A list of bindings where the right-hand side is an arbitrary set expression, as in
+    [[@@@kind_set.define k1 = e1, k2 = e2]], where [e1] and [e2] can be [(ka, kb)] *)
+val set_bindings : ((Pattern.t * Expression.t Loc.t) Loc.t list, payload, _) pattern
