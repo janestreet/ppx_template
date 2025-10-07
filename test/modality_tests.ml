@@ -1,4 +1,4 @@
-open! Core
+open! Ppx_template_test_common
 
 (* Define [Applicative] with a [Make] functor polymorphic over the portability
    of the functions. *)
@@ -170,22 +170,22 @@ module _ = struct
   include struct
     include struct
       type _t__'value_mod_nonportable' : value mod nonportable
-    end
+    end [@@ocaml.doc " @inline "]
 
     include struct
       type _t__'bits64_mod_nonportable' : bits64 mod nonportable
-    end
-  end
+    end [@@ocaml.doc " @inline "]
+  end [@@ocaml.doc " @inline "]
 
   include struct
     include struct
       type _t__'value_mod_portable'__portable : value mod portable
-    end
+    end [@@ocaml.doc " @inline "]
 
     include struct
       type _t__'bits64_mod_portable'__portable : bits64 mod portable
-    end
-  end
+    end [@@ocaml.doc " @inline "]
+  end [@@ocaml.doc " @inline "]
 end
 
 [@@@end]

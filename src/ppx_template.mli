@@ -1,7 +1,2 @@
-open! Stdppx
-open! Import
-
-(** For use in other ppxes. *)
-module Export : sig
-  module Monomorphize = Monomorphize
-end
+(* Useful for other ppxes to link against if expanding into templated code. *)
+val registered : unit

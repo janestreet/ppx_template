@@ -1,4 +1,4 @@
-open! Core
+open! Ppx_template_test_common
 
 [@@@disable_unused_warnings]
 
@@ -65,28 +65,50 @@ module List : sig
     include sig
       val cons : 'a @ global -> 'a t @ global -> 'a t @ global
     end
+    [@@ocaml.doc " @inline "]
   end
+  [@@ocaml.doc " @inline "]
 
   include sig
     include sig
+      [@@@ocaml.text "/*"]
+
       val cons__stack : 'a @ global -> 'a t @ global -> local_ 'a t [@@zero_alloc]
+
+      [@@@ocaml.text "/*"]
     end
+    [@@ocaml.doc " @inline "]
 
     include sig
+      [@@@ocaml.text "/*"]
+
       val cons__local__stack : local_ 'a -> local_ 'a t -> local_ 'a t [@@zero_alloc]
+
+      [@@@ocaml.text "/*"]
     end
+    [@@ocaml.doc " @inline "]
   end
+  [@@ocaml.doc " @inline "]
 
   include sig
     include sig
+      [@@@ocaml.text "/*"]
+
       val map__local : local_ 'a t -> f:(local_ 'a -> 'a @ global) -> 'a t @ global
+
+      [@@@ocaml.text "/*"]
+
+      [@@@ocaml.text "/*"]
 
       val fold__local
         :  local_ 'a t
         -> init:'acc @ global
         -> f:('acc @ global -> local_ 'a -> 'acc @ global)
         -> 'acc @ global
+
+      [@@@ocaml.text "/*"]
     end
+    [@@ocaml.doc " @inline "]
 
     include sig
       val map : 'a t @ global -> f:('a @ global -> 'a @ global) -> 'a t @ global
@@ -97,12 +119,20 @@ module List : sig
         -> f:('acc @ global -> 'a @ global -> 'acc @ global)
         -> 'acc @ global
     end
+    [@@ocaml.doc " @inline "]
   end
+  [@@ocaml.doc " @inline "]
 
   include sig
     include sig
+      [@@@ocaml.text "/*"]
+
       val map__local__stack : local_ 'a t -> f:(local_ 'a -> local_ 'a) -> local_ 'a t
       [@@zero_alloc]
+
+      [@@@ocaml.text "/*"]
+
+      [@@@ocaml.text "/*"]
 
       val fold__local__stack
         :  local_ 'a t
@@ -110,11 +140,20 @@ module List : sig
         -> f:(local_ 'acc -> local_ 'a -> local_ 'acc)
         -> local_ 'acc
       [@@zero_alloc]
+
+      [@@@ocaml.text "/*"]
     end
+    [@@ocaml.doc " @inline "]
 
     include sig
+      [@@@ocaml.text "/*"]
+
       val map__stack : 'a t @ global -> f:('a @ global -> local_ 'a) -> local_ 'a t
       [@@zero_alloc]
+
+      [@@@ocaml.text "/*"]
+
+      [@@@ocaml.text "/*"]
 
       val fold__stack
         :  'a t @ global
@@ -122,26 +161,30 @@ module List : sig
         -> f:(local_ 'acc -> 'a @ global -> local_ 'acc)
         -> local_ 'acc
       [@@zero_alloc]
+
+      [@@@ocaml.text "/*"]
     end
+    [@@ocaml.doc " @inline "]
   end
+  [@@ocaml.doc " @inline "]
 end = struct
   type 'a t = 'a list
 
   include struct
     include struct
       let cons (hd @ global) (tl @ global) = hd :: tl
-    end
-  end
+    end [@@ocaml.doc " @inline "]
+  end [@@ocaml.doc " @inline "]
 
   include struct
     include struct
       let cons__stack (hd @ global) (tl @ global) = exclave_ hd :: tl
-    end
+    end [@@ocaml.doc " @inline "]
 
     include struct
       let cons__local__stack (local_ hd) (local_ tl) = exclave_ hd :: tl
-    end
-  end
+    end [@@ocaml.doc " @inline "]
+  end [@@ocaml.doc " @inline "]
 
   include struct
     include struct
@@ -156,7 +199,7 @@ end = struct
         | [] -> init
         | hd :: tl -> fold__local tl ~init:(f init hd) ~f
       ;;
-    end
+    end [@@ocaml.doc " @inline "]
 
     include struct
       let rec map (t @ global) ~f =
@@ -170,8 +213,8 @@ end = struct
         | [] -> init
         | hd :: tl -> fold tl ~init:(f init hd) ~f
       ;;
-    end
-  end
+    end [@@ocaml.doc " @inline "]
+  end [@@ocaml.doc " @inline "]
 
   include struct
     include struct
@@ -186,7 +229,7 @@ end = struct
         | [] -> init
         | hd :: tl -> fold__local__stack tl ~init:((f [@zero_alloc assume]) init hd) ~f
       ;;
-    end
+    end [@@ocaml.doc " @inline "]
 
     include struct
       let rec map__stack (t @ global) ~f = exclave_
@@ -200,8 +243,8 @@ end = struct
         | [] -> init
         | hd :: tl -> fold__stack tl ~init:((f [@zero_alloc assume]) init hd) ~f
       ;;
-    end
-  end
+    end [@@ocaml.doc " @inline "]
+  end [@@ocaml.doc " @inline "]
 end
 
 [@@@end]
@@ -216,11 +259,11 @@ end
 
 include struct
   let f x = x
-end
+end [@@ocaml.doc " @inline "]
 
 include struct
   let f x = x
-end
+end [@@ocaml.doc " @inline "]
 
 [@@@end]
 
@@ -271,7 +314,7 @@ include struct
       module Inner2 = struct
         let f (x @ global) = x
       end
-    end
+    end [@@ocaml.doc " @inline "]
   end
 
   module Outer2 = struct
@@ -281,7 +324,7 @@ include struct
   module Outer3__stack = struct
     let f x = exclave_ x
   end
-end
+end [@@ocaml.doc " @inline "]
 
 include struct
   module Outer1__stack = struct
@@ -296,7 +339,7 @@ include struct
       module Inner2 = struct
         let f (x @ global) = x
       end
-    end
+    end [@@ocaml.doc " @inline "]
 
     include struct
       module Inner1__stack = struct
@@ -306,7 +349,7 @@ include struct
       module Inner2__stack = struct
         let f (local_ x) = exclave_ x
       end
-    end
+    end [@@ocaml.doc " @inline "]
   end
 
   module Outer2 = struct
@@ -316,6 +359,6 @@ include struct
   module Outer3__stack = struct
     let f x = exclave_ x
   end
-end
+end [@@ocaml.doc " @inline "]
 
 [@@@end]
