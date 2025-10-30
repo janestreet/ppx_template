@@ -646,6 +646,73 @@ Error: Unbound template identifier [stack_local] of type [Alloc].
        Hint: Did you mean [stack]?
 |}]
 
+let%template f x = x [@@synchro s = unsync_uncontended]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [unsync_uncontended] of type
+       [Synchro].
+       Hint: Did you mean [unsync]?
+|}]
+
+let%template f x = x [@@synchro s = sync_shared]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [sync_shared] of type [Synchro].
+       Hint: Did you mean [sync]?
+|}]
+
+let%template f x = x [@@synchro s @ m = unsync]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [unsync] of type [(Synchro @ Mode)].
+       Hint: Did you mean [unsync_uncontended]?
+|}]
+
+let%template f x = x [@@synchro s @ m = sync]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [sync] of type [(Synchro @ Mode)].
+       Hint: Did you mean [sync_shared] or [sync_contended]?
+|}]
+
+let%template f x = x [@synchro unsync_uncontended]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [unsync_uncontended] of type
+       [Synchro].
+       Hint: Did you mean [unsync]?
+|}]
+
+let%template f x = x [@synchro sync_shared]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [sync_shared] of type [Synchro].
+       Hint: Did you mean [sync]?
+|}]
+
+let%template f x = x [@synchro sync_contended]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [sync_contended] of type [Synchro].
+       Hint: Did you mean [sync]?
+|}]
+
+(* Other type errors *)
+
 
 let%template f x = x [@@mode m = stack @ local]
 

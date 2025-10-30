@@ -60,6 +60,7 @@ module Definitions = struct
         | Mode
         | Modality
         | Alloc
+        | Synchro
         | Set of t
     end
 
@@ -99,20 +100,23 @@ module Definitions = struct
       type mode_ = private Mode
       type modality_ = private Modality
       type alloc_ = private Alloc
+      type synchro_ = private Synchro
 
-      type _ basic =
-        | Kind : kind_ basic
-        | Mode : mode_ basic
-        | Modality : modality_ basic
-        | Alloc : alloc_ basic
+      type _ non_tuple =
+        | Kind : kind_ non_tuple
+        | Mode : mode_ non_tuple
+        | Modality : modality_ non_tuple
+        | Alloc : alloc_ non_tuple
+        | Synchro : synchro_ non_tuple
 
-      type kind = kind_ basic
-      type mode = mode_ basic
-      type modality = modality_ basic
-      type alloc = alloc_ basic
+      type kind = kind_ non_tuple
+      type mode = mode_ non_tuple
+      type modality = modality_ non_tuple
+      type alloc = alloc_ non_tuple
+      type synchro = synchro_ non_tuple
 
       type _ t =
-        | Basic : 'a basic -> 'a basic t
+        | Non_tuple : 'a non_tuple -> 'a non_tuple t
         | Tuple : ('a * 'b) tuple -> ('a * 'b) t (*_ Tuples have at least one element *)
 
       and _ tuple =
@@ -121,18 +125,22 @@ module Definitions = struct
 
       type packed = P : 'a t -> packed [@@unboxed]
 
-      module Basic = struct
-        type packed = P : 'a basic t -> packed [@@unboxed]
+      module Non_tuple = struct
+        type packed = P : 'a non_tuple t -> packed [@@unboxed]
       end
     end
 
     module Axis = struct
+      type _ singleton =
+        | Kind : Type.kind singleton
+        | Mode : Type.mode singleton
+        | Modality : Type.modality singleton
+        | Alloc : Type.alloc singleton
+        | Synchro : Type.synchro singleton
+
       type _ t =
-        | Kind : Type.kind_ Type.basic t
-        | Mode : Type.mode_ Type.basic t
-        | Modality : Type.modality_ Type.basic t
-        | Alloc : Type.alloc_ Type.basic t
-        | Set : 'a t -> 'a t
+        | Singleton : 'a singleton -> 'a t
+        | Set : 'a singleton -> 'a t
 
       type packed = P : _ t -> packed
 
@@ -147,6 +155,7 @@ module Definitions = struct
             | Affinity
             | Uniqueness
             | Yielding
+            | Forkable
         end
 
         module Mode = struct
@@ -164,17 +173,18 @@ module Definitions = struct
         end
 
         type _ t =
-          | Kind : Type.kind_ Type.basic t
-          | Mode : Mode.t Or_unrecognized.t -> Type.mode_ Type.basic t
-          | Modality : Modality.t Or_unrecognized.t -> Type.modality_ Type.basic t
-          | Alloc : Type.alloc_ Type.basic t
+          | Kind : Type.kind t
+          | Mode : Mode.t Or_unrecognized.t -> Type.mode t
+          | Modality : Modality.t Or_unrecognized.t -> Type.modality t
+          | Alloc : Type.alloc t
+          | Synchro : Type.synchro t
 
         type packed = P : _ t -> packed
       end
 
       module Namespace = struct
         type _ t =
-          | One_axis : 'a Sub_axis.t -> 'a t
+          | Singleton : 'a Sub_axis.t -> 'a t
           | Set : 'a Sub_axis.t -> 'a t
           | Tuple : ('a * 'b) tuple -> ('a * 'b) t (*_ Tuples have at least one element *)
 
@@ -201,10 +211,10 @@ module Definitions = struct
           also expressions like [(k1, k2) & k3]. *)
       type set = private Set
 
-      type ('err, 'is_set) is_set =
-        | Singleton : 'err -> ('err, singleton) is_set
+      type ('err, 'which) allow_set =
+        | Singleton_only : { why_no_set : 'err } -> ('err, singleton) allow_set
         (** Error hint for expressions that contain illegal unions *)
-        | Set : (_, set) is_set
+        | Set_or_singleton : (_, set) allow_set
 
       (** ['a] is the type of [Value]s to which an [Expression] evaluates. ['s] is whether
           the expression is allowed to syntactically contain sets (corresponding to the
@@ -230,13 +240,13 @@ module Definitions = struct
       type packed = P : ('a, 's) t -> packed [@@unboxed]
 
       module Basic = struct
-        type packed = P : ('a Type.basic, singleton) t -> packed [@@unboxed]
+        type packed = P : ('a Type.non_tuple, singleton) t -> packed [@@unboxed]
       end
     end
 
     module Value = struct
       type 'a t =
-        | Identifier : 'a Type.basic Identifier.t -> 'a Type.basic t
+        | Identifier : 'a Type.non_tuple Identifier.t -> 'a Type.non_tuple t
         | Kind_product : Type.kind t Nonempty_list.t -> Type.kind t
         | Kind_mod : Type.kind t * Type.modality t Nonempty_list.t -> Type.kind t
         | Tuple : ('a * 'b) tuple -> ('a * 'b) t (*_ Tuples have at least one element *)
@@ -248,7 +258,7 @@ module Definitions = struct
       type packed = P : 'a t -> packed [@@unboxed]
 
       module Basic = struct
-        type packed = P : 'a Type.basic t -> packed [@@unboxed]
+        type packed = P : 'a Type.non_tuple t -> packed [@@unboxed]
       end
     end
 
@@ -313,7 +323,7 @@ module Definitions = struct
             to enable [[@@alloc (a @ m) = ...]] to mangle only based on [a]. *)
         ; mangle_axis : 'mangle Axis.t
         }
-        constraint 'mangle = _ Type.basic
+        constraint 'mangle = _ Type.non_tuple
     end
 
     module Node = struct
@@ -323,6 +333,7 @@ module Definitions = struct
         | Mode : mode loc -> Type.mode t
         | Modality : modality loc -> Type.modality t
         | Alloc : Type.alloc t
+        | Synchro : Type.synchro t
     end
   end
 
@@ -333,7 +344,7 @@ module Definitions = struct
           ; sexp_of_kind : 'value -> Sexp.t
           ; value : 'value
           ; expected_type : _ Typed.Type.t
-          ; expected_sets : (string, _) Typed.Expression.is_set option
+          ; expected_sets : (string, _) Typed.Expression.allow_set option
           ; hint : string option
           }
           -> t
@@ -412,9 +423,9 @@ module type Language = sig
         include Type
       end
 
-      module Basic : sig
+      module Non_tuple : sig
         include module type of struct
-          include Basic
+          include Non_tuple
         end
       end
 
@@ -423,6 +434,7 @@ module type Language = sig
       val mode : mode t
       val modality : modality t
       val alloc : alloc t
+      val synchro : synchro t
       val tuple2 : 'a t -> 'b t -> ('a * ('b * unit)) t
     end
 
@@ -433,7 +445,7 @@ module type Language = sig
 
       module Map : Map.S with type key := packed
 
-      val of_type : 'a Type.basic Type.t -> 'a Type.basic t
+      val of_type : 'a Type.non_tuple Type.t -> 'a Type.non_tuple t
       val is_set : 'a t -> bool
 
       module Sub_axis : sig
@@ -467,8 +479,8 @@ module type Language = sig
 
         module Map : Stdlib.Map.S with type key := packed
 
-        val of_identifier : 'a Type.basic Identifier.t -> 'a Type.basic t
-        val of_value : 'a Type.basic Value.t -> 'a Type.basic t
+        val of_identifier : 'a Type.non_tuple Identifier.t -> 'a Type.non_tuple t
+        val of_value : 'a Type.non_tuple Value.t -> 'a Type.non_tuple t
       end
 
       module Namespace : sig
@@ -494,10 +506,10 @@ module type Language = sig
       val compare : 'a t -> 'a t -> int
 
       (** Checks whether a value is a default value for its axis. *)
-      val is_default : 'a Type.basic t -> bool
+      val is_default : 'a Type.non_tuple t -> bool
 
       (** Convert a value in the template language to a concrete OCaml AST node. *)
-      val to_node : 'a Type.basic t -> loc:location -> 'a Type.basic Node.t
+      val to_node : 'a Type.non_tuple t -> loc:location -> 'a Type.non_tuple Node.t
     end
 
     module Pattern : sig
@@ -519,12 +531,12 @@ module type Language = sig
       end
 
       val to_set : ('a, _) t -> ('a, set) t
-      val untype : ('a, 'is_set) t -> Untyped.Expression.t
+      val untype : ('a, 'allow_set) t -> Untyped.Expression.t
 
       val type_check
         :  Untyped.Expression.t
         -> expected:'a Type.t
-        -> is_set:(string, 's) is_set
+        -> allow_set:(string, 's) allow_set
         -> (('a, 's) t, Type_error.t) result
     end
 
@@ -560,8 +572,8 @@ module type Language = sig
       val bind_set
         :  t
         -> loc:location
-        -> 'a Type.basic Identifier.t
-        -> 'a Type.basic Value.t Nonempty_list.t
+        -> 'a Type.non_tuple Identifier.t
+        -> 'a Type.non_tuple Value.t Nonempty_list.t
         -> (t, Syntax_error.t) result
 
       (** Evaluate an expression in the given environment. Unbound

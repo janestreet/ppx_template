@@ -4,7 +4,7 @@ open Language.Typed
 
 (* Individual values are mangled based on their structures, and then concatenated together
    with double-underscores. *)
-let rec mangle_value : type a. a Type.basic Value.t -> string =
+let rec mangle_value : type a. a Type.non_tuple Value.t -> string =
   let group strings = strings |> String.concat ~sep:"_" |> Printf.sprintf "'%s'" in
   fun value ->
     match value with
@@ -68,19 +68,19 @@ module Suffix = struct
           (* sets are surrounded with additional [''] to disambiguate from the non-set
              versions *)
           match axis with
-          | Set (Set _) -> failwith "Sets of sets not supported"
           | Set _ -> "''"
-          | _ -> ""
+          | Singleton _ -> ""
         in
         List.map manglers ~f:(fun (Value.Basic.P value) ->
           String.concat ~sep:"" [ set_mangling; mangle_value value; set_mangling ])
     in
     { txt =
         extract (Set Kind)
-        @ extract Kind
-        @ extract Mode
-        @ extract Modality
-        @ extract Alloc
+        @ extract (Singleton Kind)
+        @ extract (Singleton Mode)
+        @ extract (Singleton Modality)
+        @ extract (Singleton Alloc)
+        @ extract (Singleton Synchro)
     ; loc = Location.none
     }
   ;;

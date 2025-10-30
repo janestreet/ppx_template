@@ -5,7 +5,9 @@ open Language.Typed
 module Definitions = struct
   module Poly = struct
     type 'mangle binding = Binding : (_, 'mangle) Binding.with_mangle -> 'mangle binding
-    type t = Poly : 'mangle Type.basic Axis.t * 'mangle Type.basic binding list -> t
+
+    type t =
+      | Poly : 'mangle Type.non_tuple Axis.t * 'mangle Type.non_tuple binding list -> t
   end
 
   module Mono = struct
@@ -61,6 +63,18 @@ module Definitions = struct
     type 'a mono = ('a, mono_w) t
     type 'a zero_alloc_if = ('a, zero_alloc_if_w) t
     type 'a any = ('a, any_w) t
+  end
+
+  module Zero_alloc_if = struct
+    (** Represents attributes that optionally annotate code as zero-alloc. [loc] is the
+        location of the attribute's payload. [expr] is the expression (mode, alloc, etc.)
+        to compare against to determine whether to apply [[@@zero_alloc]]. [args] is the
+        arguments to be given to the [[@@zero_alloc]] attribute. *)
+    type 'a t =
+      { loc : location
+      ; expr : ('a, Expression.singleton) Expression.t Loc.t
+      ; args : expression list
+      }
   end
 end
 
@@ -144,26 +158,17 @@ module type Attributes = sig
   val exclave_if_stack
     : ([ `expression ], (Type.alloc, Expression.singleton) Expression.t Loc.t option) t
 
-  (** A handler for attributes that optionally annotate code as zero-alloc. When the
-      attribute is present, produces [Some (loc, mode, payload)], where [loc] is the
-      location of the payload, [mode] is the mode to compare against, and [payload] is the
-      payload to be given to the [[@@zero_alloc]] attribute. *)
-  val zero_alloc_if_local
-    : ( zero_alloc_if_w
-        , (location
-          * (Type.mode, Expression.singleton) Expression.t Loc.t
-          * expression list)
-            option )
-        t
+  module Zero_alloc_if : sig
+    include module type of struct
+      include Zero_alloc_if
+    end
+  end
+
+  (** A handler for attributes that optionally annotate code as zero-alloc. *)
+  val zero_alloc_if_local : (zero_alloc_if_w, Type.mode Zero_alloc_if.t option) t
 
   (** Like {!zero_alloc_if_local}, but for allocation identifiers. *)
-  val zero_alloc_if_stack
-    : ( zero_alloc_if_w
-        , (location
-          * (Type.alloc, Expression.singleton) Expression.t Loc.t
-          * expression list)
-            option )
-        t
+  val zero_alloc_if_stack : (zero_alloc_if_w, Type.alloc Zero_alloc_if.t option) t
 
   val with_ : ([ `module_type ], signature option) t
   val with_attr : (module_type, (signature, Syntax_error.t) result) Attribute.t
@@ -189,7 +194,7 @@ module type Attributes = sig
     end
 
     module Define : sig
-      type t = Define : 'a Type.basic Binding.t list -> t
+      type t = Define : 'a Type.non_tuple Binding.t list -> t
     end
 
     module Poly : sig
