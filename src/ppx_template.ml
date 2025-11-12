@@ -131,11 +131,11 @@ let mono_attrs =
         let loc = Attributes.Context.location ctxt item in
         match
           Result.bind (check_if_bare_attributes_allowed ~loc) ~f:(fun () ->
-            ([ P Kind, maybe_explicit kind kind_explicit
+            ([ P (Singleton Kind), maybe_explicit kind kind_explicit
              ; P (Set Kind), maybe_explicit kind_set kind_set_explicit
-             ; P Mode, maybe_explicit mode mode_explicit
-             ; P Modality, maybe_explicit modality modality_explicit
-             ; P Alloc, maybe_explicit alloc alloc_explicit
+             ; P (Singleton Mode), maybe_explicit mode mode_explicit
+             ; P (Singleton Modality), maybe_explicit modality modality_explicit
+             ; P (Singleton Alloc), maybe_explicit alloc alloc_explicit
              ]
              : (Language.Typed.Axis.packed * _) list)
             |> List.filter_map ~f:(fun (type_, exprs) ->

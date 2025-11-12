@@ -605,3 +605,64 @@ module type S = sig
 end
 
 [@@@end]
+
+[@@@expand_inline
+  let x = {| wildcard patterns smoke test |}
+
+  module%template _ : sig
+    val id : ('a : f & s). 'a @ l v -> 'a @ l v
+    [@@kind (f, s) = ((float64, bits64), (bits64, float64))]
+    [@@mode l = (global, local), v = (read_write, read)]
+  end = struct
+    let id x = x
+    [@@kind (_, _) = ((float64, bits64), (bits64, float64))]
+    [@@mode _ = (global, local), _ = (read_write, read)]
+    ;;
+  end]
+
+let x = {| wildcard patterns smoke test |}
+
+module _ : sig
+  [@@@ocaml.text "/*"]
+
+  val id__float64
+    : ('a : float64 & bits64).
+    'a @ global read_write -> 'a @ global read_write
+
+  val id__float64__read : ('a : float64 & bits64). 'a @ global read -> 'a @ global read
+
+  val id__float64__local
+    : ('a : float64 & bits64).
+    'a @ local read_write -> 'a @ local read_write
+
+  val id__float64__local__read
+    : ('a : float64 & bits64).
+    'a @ local read -> 'a @ local read
+
+  val id__bits64
+    : ('a : bits64 & float64).
+    'a @ global read_write -> 'a @ global read_write
+
+  val id__bits64__read : ('a : bits64 & float64). 'a @ global read -> 'a @ global read
+
+  val id__bits64__local
+    : ('a : bits64 & float64).
+    'a @ local read_write -> 'a @ local read_write
+
+  val id__bits64__local__read
+    : ('a : bits64 & float64).
+    'a @ local read -> 'a @ local read
+
+  [@@@ocaml.text "/*"]
+end = struct
+  let id__float64 x = x
+  and id__float64__read x = x
+  and id__float64__local x = x
+  and id__float64__local__read x = x
+  and id__bits64 x = x
+  and id__bits64__read x = x
+  and id__bits64__local x = x
+  and id__bits64__local__read x = x
+end
+
+[@@@end]

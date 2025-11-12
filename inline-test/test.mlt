@@ -646,6 +646,73 @@ Error: Unbound template identifier [stack_local] of type [Alloc].
        Hint: Did you mean [stack]?
 |}]
 
+let%template f x = x [@@synchro s = unsync_uncontended]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [unsync_uncontended] of type
+       [Synchro].
+       Hint: Did you mean [unsync]?
+|}]
+
+let%template f x = x [@@synchro s = sync_shared]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [sync_shared] of type [Synchro].
+       Hint: Did you mean [sync]?
+|}]
+
+let%template f x = x [@@synchro s @ m = unsync]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [unsync] of type [(Synchro @ Mode)].
+       Hint: Did you mean [unsync_uncontended]?
+|}]
+
+let%template f x = x [@@synchro s @ m = sync]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [sync] of type [(Synchro @ Mode)].
+       Hint: Did you mean [sync_shared] or [sync_contended]?
+|}]
+
+let%template f x = x [@synchro unsync_uncontended]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [unsync_uncontended] of type
+       [Synchro].
+       Hint: Did you mean [unsync]?
+|}]
+
+let%template f x = x [@synchro sync_shared]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [sync_shared] of type [Synchro].
+       Hint: Did you mean [sync]?
+|}]
+
+let%template f x = x [@synchro sync_contended]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [sync_contended] of type [Synchro].
+       Hint: Did you mean [sync]?
+|}]
+
+(* Other type errors *)
+
 
 let%template f x = x [@@mode m = stack @ local]
 
@@ -1399,3 +1466,65 @@ Line _, characters _-_:
 Error: [default_if_multiple] with multiple expressions on the RHS not
        allowed; use [default] instead
 |}]
+
+(* [Pexp_hole] is banned in expression position. *)
+
+[%%template [@@@kind k = _]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: tuple expected
+|}]
+
+(* This also applies to punned bindings. *)
+
+[%%template [@@@mode _]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: apply expected
+|}]
+
+(* Duplicate patterns within a tuple are banned. *)
+
+[%%template [@@@mode (a, a) = ((global, global), (local, local))]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [%template]: duplicate patterns: (a)
+|}]
+
+(* Duplicate patterns across tuples are banned. *)
+
+[%%template
+  [@@@mode
+    (a, _) = ((global, global), (local, local))
+    , (_, a) = ((read_write, read_write), (read, read))]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [%template]: duplicate patterns: (a)
+|}]
+
+
+[%%template [@@@mode _ = ((global, global), (local, local))]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Type mismatch" (kind expression) (value (Comma_separated global
+       global))
+         ("expected type" Mode) ("expected sets" singleton)
+         (hint "mode sets are not supported")))
+|}]
+
+(* ...except for [alloc], since its typechecking is special-cased. *)
+
+[%%template [@@@alloc _ = (heap @ global, stack @ local)]]
+
+[%%expect {| |}]

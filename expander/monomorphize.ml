@@ -51,10 +51,16 @@ let extract_attrs (type a) (ctx : a Attributes.Context.poly) (node : a) =
   | Include_infos -> node.pincl_attributes
 ;;
 
+type error =
+  { loc : Location.t
+  ; err : Syntax_error.t
+  ; attrs : attributes
+  }
+
 let extract_bindings (type a) (ctx : a Attributes.Context.poly) node =
   match Attributes.consume Attributes.poly ctx node with
   | Ok (node, bindings) -> Ok (node, bindings)
-  | Error err -> Error (extract_loc ctx node, err, extract_attrs ctx node)
+  | Error err -> Error { loc = extract_loc ctx node; err; attrs = extract_attrs ctx node }
 ;;
 
 let extract_floating (type a) (ctx : a Attributes.Floating.Context.poly) item =
@@ -134,6 +140,12 @@ let handle_one_attribute
   |> List.fold_left ~init ~f:(handle_one_binding ~original_env)
 ;;
 
+type 'a instance =
+  { node : 'a
+  ; env : Env.t
+  ; manglers : Value.Basic.packed list Maybe_explicit.t Axis.Map.t
+  }
+
 let instantiate poly_attributes ~env:(original_env : Env.t) =
   let envs =
     List.fold_left
@@ -143,8 +155,12 @@ let instantiate poly_attributes ~env:(original_env : Env.t) =
   in
   envs
   >>| List.map ~f:(fun (env, manglers) ->
-    (* Manglers were added in reverse order *)
-    env, Axis.Map.map (Maybe_explicit.map ~f:List.rev) manglers)
+    { node = ()
+    ; env
+    ; manglers =
+        (* Manglers were added in reverse order *)
+        Axis.Map.map (Maybe_explicit.map ~f:List.rev) manglers
+    })
 ;;
 
 let consume_poly
@@ -159,10 +175,12 @@ let consume_poly
     | Error _ as err -> err
     | Ok (node, polys) ->
       (match instantiate polys ~env with
-       | Error sexp -> Error (extract_loc attr_ctx node, sexp, extract_attrs attr_ctx node)
+       | Error err ->
+         Error
+           { loc = extract_loc attr_ctx node; err; attrs = extract_attrs attr_ctx node }
        | Ok list ->
          let instances =
-           List.map list ~f:(fun (env, manglers) ->
+           List.map list ~f:(fun { node = (); env; manglers } ->
              (* Use current default manglers when axis is unspecified. *)
              let manglers =
                Axis.Map.merge
@@ -175,7 +193,7 @@ let consume_poly
                  manglers
              in
              (* Associate node with the instance *)
-             node, env, manglers)
+             { node; env; manglers })
          in
          Ok instances))
   |> List.fold_right ~init:(Ok []) ~f:(fun head tail ->
@@ -187,13 +205,9 @@ let consume_poly
   |> function
   | Ok instances -> Ok (List.concat instances)
   | Error errs ->
-    let locs, errs, attrs =
-      List.fold_right
-        errs
-        ~init:([], [], [])
-        ~f:(fun (loc, err, attr) (locs, errs, attrs) ->
-          loc :: locs, err :: errs, attr :: attrs)
-    in
+    let locs = List.map errs ~f:(fun err -> err.loc)
+    and errs = List.map errs ~f:(fun err -> err.err)
+    and attrs = List.concat_map errs ~f:(fun err -> err.attrs) in
     let loc =
       List.fold_left ~init:(List.hd locs) (List.tl locs) ~f:(fun a b ->
         { loc_start = Location.min_pos a.loc_start b.loc_start
@@ -207,8 +221,7 @@ let consume_poly
       | [ err ] -> err
       | [] -> Syntax_error.createf ~loc "empty error list"
     in
-    let attrs = List.concat attrs in
-    Error (loc, err, attrs)
+    Error { loc; err; attrs }
 ;;
 
 (* Ppxlib individually applies every [@@deriving] or [@@deriving_inline] attribute it
@@ -349,18 +362,18 @@ let consume_zero_alloc_if
   let* add_zero_alloc_if_local =
     match zero_alloc_if_local with
     | None -> Ok None
-    | Some (loc, mode, payload) ->
+    | Some { loc; expr = mode; args } ->
       (match is_local mode ~env with
-       | Ok true -> Ok (Some (loc, payload))
+       | Ok true -> Ok (Some (loc, args))
        | Ok false -> Ok None
        | Error _ as err -> err)
   in
   let+ add_zero_alloc_if_stack =
     match zero_alloc_if_stack with
     | None -> Ok None
-    | Some (loc, alloc, payload) ->
+    | Some { loc; expr = alloc; args } ->
       (match is_stack alloc ~env with
-       | Ok true -> Ok (Some (loc, payload))
+       | Ok true -> Ok (Some (loc, args))
        | Ok false -> Ok None
        | Error _ as err -> err)
   in
@@ -421,13 +434,13 @@ let t ~mk_struct ~mk_sig =
 
     method! jkind_annotation ctx ({ pjkind_desc; pjkind_loc } as jkind) =
       match pjkind_desc with
-      | Abbreviation kind ->
+      | Pjk_abbreviation kind ->
         (match Env.find ctx.env { ident = kind; type_ = Type.kind } with
          | None -> super#jkind_annotation ctx jkind
          | Some kind ->
            let (Jkind_annotation kind) = Value.to_node ~loc:pjkind_loc kind in
            kind)
-      | Mod (base, modifiers) ->
+      | Pjk_mod (base, modifiers) ->
         (* Even though [modifiers] is represented as a list of [mode]s, they conceptually
            act more like modalities. *)
         let modifiers =
@@ -438,7 +451,7 @@ let t ~mk_struct ~mk_sig =
             { txt = Ppxlib_jane.Mode name; loc })
         in
         { pjkind_loc = self#location ctx pjkind_loc
-        ; pjkind_desc = Mod (self#jkind_annotation ctx base, modifiers)
+        ; pjkind_desc = Pjk_mod (self#jkind_annotation ctx base, modifiers)
         }
       | _ -> super#jkind_annotation ctx jkind
 
@@ -540,7 +553,7 @@ let t ~mk_struct ~mk_sig =
 
     (* The [@@kind] attribute can appear on various nodes that define or declare values,
        modules, or types. For each such node, we determine what layout mappings are being
-       requested (no attribute is equivalent to [@@kind __ = value]), and for each
+       requested (no attribute is equivalent to [@@kind _ = value]), and for each
        such mapping, we duplicate the definition/declaration, and mangle the
        defined/declared name accordingly. *)
     method
@@ -578,18 +591,20 @@ let t ~mk_struct ~mk_sig =
         in
         (match consume_poly ~env:ctx.env ~defaults:ctx.defaults attr_ctx nodes with
          | Ok instances ->
-           List.mapi instances ~f:(fun i (node, env, manglers) : _ Maybe_hide_in_docs.t ->
-             let node, res = visit_mangle (Mangle.Suffix.create manglers) node in
-             let node =
-               visit_self
-                 { Context.ghostify = ctx.ghostify || i > 0
-                 ; env
-                 ; defaults = Context.Defaults.empty
-                 }
-                 node
-             in
-             { node; hide_in_docs = Mangle.Result.did_mangle res })
-         | Error (_, err, _) ->
+           List.mapi
+             instances
+             ~f:(fun i { node; env; manglers } : _ Maybe_hide_in_docs.t ->
+               let node, res = visit_mangle (Mangle.Suffix.create manglers) node in
+               let node =
+                 visit_self
+                   { Context.ghostify = ctx.ghostify || i > 0
+                   ; env
+                   ; defaults = Context.Defaults.empty
+                   }
+                   node
+               in
+               { node; hide_in_docs = Mangle.Result.did_mangle res })
+         | Error { loc = _; err; attrs = _ } ->
            [ { node =
                  Syntax_error_conversion.to_extension_node
                    (Attributes.Context.poly_to_any attr_ctx)
@@ -656,9 +671,8 @@ let t ~mk_struct ~mk_sig =
                           ~init:(Ok original_env)
                           ~f:(fun env ({ pattern; expression; lookup } : _ Binding.t) ->
                             let* env = env in
-                            let (Identifier ident) = pattern in
                             let* set_value = Env.eval original_env lookup expression in
-                            Env.bind_set env ~loc ident set_value)
+                            Env.bind_set env ~loc pattern set_value)
                       in
                       (match new_env with
                        | Ok env -> loop { ctx with env } items
@@ -672,7 +686,7 @@ let t ~mk_struct ~mk_sig =
                       (match instantiate [ explicitness, bindings ] ~env:ctx.env with
                        | Ok instances ->
                          let is_many = List.length instances > 1 in
-                         List.mapi instances ~f:(fun i (env, manglers) ->
+                         List.mapi instances ~f:(fun i { node = (); env; manglers } ->
                            let defaults =
                              match kind with
                              | Never_add_mangler -> ctx.defaults

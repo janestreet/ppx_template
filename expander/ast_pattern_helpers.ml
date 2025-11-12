@@ -14,7 +14,7 @@ let map_pat { pat } ~f = { pat = (fun () -> map1 (pat ()) ~f) }
 let at_most_one_pattern p = p ^:: nil ||| map0 nil ~f:[]
 let at_most_one_eval p = pstr (at_most_one_pattern (pstr_eval p nil))
 
-let ident' =
+let ident_pattern =
   { pat =
       (fun () ->
         pexp_ident
@@ -25,7 +25,8 @@ let ident' =
                   of alloc-poly (otherwise, [[@@alloc a = heap]] can be parsed as a punned
                   binding with the identifiers [( = )], [a], and [heap]). *)
                Ast_pattern.fail loc ("Invalid ppx_template identifier: " ^ ident)
-             | _ -> { txt = { Identifier.ident }; loc })))
+             | _ -> Pattern.Identifier { ident }))
+        ||| map0 pexp_hole ~f:Pattern.Wildcard)
   }
 ;;
 
@@ -38,8 +39,6 @@ let pexp_tuple p =
       | hd :: (_ :: _ as tl) -> (hd :: tl : _ Nonempty_list.t))
 ;;
 
-let ident = map_pat ident' ~f:Loc.txt
-let ident_pattern = map_pat ident ~f:(fun ident -> Pattern.Identifier ident)
 let one_or_many a b = map1 a ~f:(fun x -> [ x ]) ||| b
 let tuple_or_one p = pexp_tuple p ||| map1 p ~f:(fun x : _ Nonempty_list.t -> [ x ])
 let one_or_tuple p = map1 p ~f:(fun x : _ Nonempty_list.t -> [ x ]) ||| pexp_tuple p
@@ -148,12 +147,9 @@ let binding =
   }
 ;;
 
-(* Parses an [expression] of the form [a] as [<generated symbol>, [ "a" ]]. *)
+(* Parses an [expression] of the form [a] as [_, [ "a" ]]. *)
 let punned_binding =
-  map_pat expr ~f:(fun expr ->
-    let ident = Ppxlib.gen_symbol ~prefix:"binding" () in
-    let pattern = Pattern.Identifier { ident } in
-    pattern, ([ expr ] : _ Nonempty_list.t))
+  map_pat expr ~f:(fun expr -> Pattern.Wildcard, ([ expr ] : _ Nonempty_list.t))
 ;;
 
 let single_ident () = pstr (pstr_eval (expr.pat ()) nil ^:: nil)

@@ -6,6 +6,7 @@ include struct
     include Ast_pattern
 
     let fail = Ppxlib__.Ast_pattern0.fail
+    let pexp_hole = pexp_hole
   end
 
   module Attribute = Attribute

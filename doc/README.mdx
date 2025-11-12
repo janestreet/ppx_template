@@ -68,7 +68,7 @@ module type%template T = sig
   (* equivalently: *)
   val t_of_sexp : Sexp.t -> t
   val sexp_of_t : t @ m -> Sexp.t @ m
-  [@@alloc __ @ m = (heap @ global, stack @ local)]
+  [@@alloc _ @ m = (heap @ global, stack @ local)]
 
   (* When multiple items are being templated over the same parameters, you can
      avoid repetition by using a toplevel attribute, which applies to all items
@@ -110,9 +110,9 @@ module%template T : T = struct
 
   let t_of_sexp _ = failwith "unimplemented"
 
-  (* The [__] symbol is often used to ignore the parameter when it can be inferred by the
+  (* The [_] symbol is often used to ignore the parameter when it can be inferred by the
      type-checker *)
-  [@@@mode.default __ = (nonportable, portable)]
+  [@@@mode.default _ = (nonportable, portable)]
 
   let construct_tuple a b = (a, b)
   let tuple_fst (a, _) = a
@@ -171,10 +171,10 @@ for details.
 ### Poly
 
 Attached poly-attributes (`[@@kind ...]`, `[@@kind_set ...]`, `[@@mode ...]`,
-`[@@modality ...]`, and `[@@alloc ...]`) can appear on structure/signature items; these
-attributes produce multiple copies of the attached template item, updating each instance's
-AST based on the specified bindings. Additionally, these attributes mangle the instance's
-name (e.g. function name or module name) based on the requested bindings so that the
+`[@@modality ...]`, `[@@alloc ...]`, and `[@@synchro ...]`) can appear on structure/signature
+items; these attributes produce multiple copies of the attached template item, updating each
+instance's AST based on the specified bindings. Additionally, these attributes mangle the
+instance's name (e.g. function name or module name) based on the requested bindings so that the
 desired template instance can be picked out by name (see [below](#mangling)):
 
 ```ocaml
@@ -339,12 +339,12 @@ For more information about the semantics of sets in kind expressions, see
 
 ### Mono
 
-Mono-attributes (`[@kind ...]`, `[@kind_set ...]`, `[@mode ...]`, `[@modality ...]`, and
-`[@alloc ...]`) can appear attached to identifiers in expression, type, module expression,
-and module type positions. Mono-attributes have the effect of mangling the attached
-identifier to the name corresponding to the requested template instance. This helps with
-readability, as well as avoiding dependence on the particular mangling mechanism
-`ppx_template` uses as this can change in the future.
+Mono-attributes (`[@kind ...]`, `[@kind_set ...]`, `[@mode ...]`, `[@modality ...]`,
+`[@alloc ...]`, and `[@synchro ...]`) can appear attached to identifiers in expression,
+type, module expression, and module type positions. Mono-attributes have the effect of
+mangling the attached identifier to the name corresponding to the requested template
+instance. This helps with readability, as well as avoiding dependence on the particular
+mangling mechanism `ppx_template` uses as this can change in the future.
 
 ```ocaml
 let%template flip (type (a : k) (b : k) (c : k)) (f : (a -> b -> c) @ p) = fun x y -> f y x
@@ -432,7 +432,6 @@ Error: ([%template]
 The `[@with: ...]` attribute can be attached to module types to leverage familiar
 `ppx_template` features for generating families of `with` constraints.
 
-
 Consider the module type
 
 ```ocaml
@@ -503,10 +502,10 @@ Error: Invalid [@template.with] payload:
 
 ### Misc
 
-The `[@@alloc ...]` poly-attributes have some additional supported syntax, and there are a few
-other attributes that interact with particular axes (`[@exclave_if_local ...]`,
-`[@exclave_if_stack ...]`, `[@zero_alloc_if_local ...]`, and `[@zero_alloc_if_stack ...]`).
-More details on these can be found in sections below.
+The `[@@alloc ...]` and `[@@synchro ...]` poly-attributes have some additional supported
+syntax, and there are a few other attributes that interact with particular axes
+(`[@exclave_if_local ...]`, `[@exclave_if_stack ...]`, `[@zero_alloc_if_local ...]`, and
+`[@zero_alloc_if_stack ...]`). More details on these can be found in sections below.
 
 ## Attribute payloads
 
@@ -805,10 +804,9 @@ end
 
 module type T = sig
   val f : 'a @ m -> 'a @ m
-  [@@alloc __ @ m = (heap_global, stack_local)]
-  (* You can use [__] to ignore a template variable; this will still mangle the duplicate [f] and
-     mangle the name, but makes it clear that the alloc variable isn't used.
-     Side note: single [_] doesn't work due to how the syntax is implemented. *)
+  [@@alloc _ @ m = (heap_global, stack_local)]
+  (* You can use [_] to ignore a template variable; this will still mangle the duplicate [f] and
+     mangle the name, but makes it clear that the alloc variable isn't used. *)
 end
 ]
 ```
@@ -817,6 +815,28 @@ As with mode-polymorphism, the `[@@zero_alloc_if_stack a args...]` attribute con
 attaches a `[@@zero_alloc args...]` attribute to a syntax node when `a = stack`. This is the
 preferred attribute over `[@@zero_alloc_if_local]` as conditionally being zero-alloc is
 a property of allocation behavior, not of modes.
+
+## Conditional synchronization
+
+It is sometimes useful to be able to abstract over whether or not an operation requires
+synchronized operations depending on the contention of the input. This generally will
+involve different mode behaviors depending on the particular synchronization behavior.
+In the future, some runtime witness (e.g. a modular implicit) will carry information
+about what synchronization to use, and we will need some kind of mode polymorphism
+and/or abstract modes.
+
+To enable polymorphism over synchronization now, we include a `synchro` axis as part of
+`ppx_template`, which can take on values `sync` (for "synchronized") and `unsync`
+(for "unsynchronized"), with the default being `unsync`. Like the `alloc` axis, these
+values don't directly correspond to any particular part of the OCaml ast, and are just
+used by some libraries to enable polymorphism over their synchronization behavior.
+
+The motivating example for adding this is
+[`Portable_kernel.Subatomic`](https://ocaml-docs/portable_kernel/Portable_kernel/Subatomic/index.html),
+which allows synchronized operations over `shared` values and unsynchronized operations
+over `uncontended` values.
+
+
 
 ## Tuples
 
@@ -1014,13 +1034,12 @@ Instead, a trick for this is to write a binding which is polymorphic over exactl
 kind - for example, to bind `Float` and `Float__float64` modules, one might write:
 
 ```ocaml
-module%template [@kind __ = value] Float = Float (* alternatively, [@@kind __ = value] *)
-module%template [@kind __ = float64] Float = Float_u
+module%template [@kind _ = value] Float = Float (* alternatively, [@@kind _ = value] *)
+module%template [@kind _ = float64] Float = Float_u
 ```
 
-Here, `__` is just an identifier, nothing special, but seems like a good way to indicate
-that a given kind variable is unused in the body of the binding. In these cases, you might
-prefer to use punning to avoid the extra syntax clutter:
+Here, `_` indicates that a given kind variable is unused in the body of the binding. In
+these cases, you might prefer to use punning to avoid the extra syntax clutter:
 
 ```ocaml
 module%template [@kind value] Float = Float (* alternatively, [@@kind value] *)
