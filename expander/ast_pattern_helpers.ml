@@ -72,17 +72,37 @@ let expr =
       | [] -> ()
     in
     match expr, Ppxlib_jane.Shim.Expression_desc.of_parsetree ~loc pexp_desc with
+    | _, Pexp_constraint ({ pexp_desc; pexp_loc; _ }, Some { ptyp_desc; _ }, []) ->
+      (match
+         ( Ppxlib_jane.Shim.Expression_desc.of_parsetree ~loc:pexp_loc pexp_desc
+         , Ppxlib_jane.Shim.Core_type_desc.of_parsetree ptyp_desc )
+       with
+       | Pexp_hole, Ptyp_any (Some jkind) ->
+         let rec of_jkind : jkind_annotation -> Expression.t = function
+           | { pjkind_desc = Pjk_abbreviation ident; _ } ->
+             Typed (Identifier { ident }, P (Non_tuple Kind))
+           | { pjkind_desc = Pjk_mod (jkind, mode :: modes); _ } ->
+             let modes =
+               Nonempty_list.map (mode :: modes) ~f:(fun { txt = Mode ident; _ } ->
+                 Expression.Identifier { ident })
+             in
+             Kind_mod (of_jkind jkind, modes)
+           | { pjkind_desc = Pjk_product (jkind :: jkinds); _ } ->
+             Kind_product (Nonempty_list.map (jkind :: jkinds) ~f:of_jkind)
+           | { pjkind_loc = loc; _ } -> expected ~loc "kind abbreviation, mod, or product"
+         in
+         of_jkind jkind
+       | _ -> expected ~loc "(_ : (_ : <kind>))")
     | _, Pexp_ident { txt = Lident ident; _ } -> Identifier { ident }
     | [%expr [%e? lhs] & [%e? rhs]], _ ->
       let lhs = of_expr lhs in
       let rhs =
         match of_expr rhs with
         | Kind_product rhs ->
-          (* Special case: because we're using the expression language to represent
-             kinds, we need to cheat and parse [a & b & c === a & (b & c)] as a flat
-             kind. *)
+          (* Special case: because we're using the expression language to represent kinds,
+             we need to cheat and parse [a & b & c === a & (b & c)] as a flat kind. *)
           rhs
-        | (Comma_separated _ | Identifier _ | Kind_mod _) as rhs -> [ rhs ]
+        | (Comma_separated _ | Identifier _ | Kind_mod _ | Typed _) as rhs -> [ rhs ]
       in
       Kind_product (lhs :: Nonempty_list.to_list rhs)
     | [%expr [%e? base] mod [%e? modifiers_exp]], _ ->
@@ -118,8 +138,8 @@ let expr =
   in
   { pat =
       (fun () ->
-        Ast_pattern.of_func (fun (_ : Ast_pattern.context) loc expr k ->
-          k { txt = of_expr expr; loc }))
+        Ast_pattern.of_func (fun (_ : Ast_pattern.context) (_ : location) expr k ->
+          k { txt = of_expr expr; loc = expr.pexp_loc }))
   }
 ;;
 

@@ -53,6 +53,44 @@ open! Import
        expressions are concatenated. *)
 
 module Definitions = struct
+  module Type = struct
+    (*_ Note: we only provide concrete definitions for these types so that the compiler
+        knows they are distinct. They are [private] so that they can only ever be used as
+        phantom types. *)
+    type kind_ = private Kind
+    type mode_ = private Mode
+    type modality_ = private Modality
+    type alloc_ = private Alloc
+    type synchro_ = private Synchro
+
+    type _ non_tuple =
+      | Kind : kind_ non_tuple
+      | Mode : mode_ non_tuple
+      | Modality : modality_ non_tuple
+      | Alloc : alloc_ non_tuple
+      | Synchro : synchro_ non_tuple
+
+    type kind = kind_ non_tuple
+    type mode = mode_ non_tuple
+    type modality = modality_ non_tuple
+    type alloc = alloc_ non_tuple
+    type synchro = synchro_ non_tuple
+
+    type _ t =
+      | Non_tuple : 'a non_tuple -> 'a non_tuple t
+      | Tuple : ('a * 'b) tuple -> ('a * 'b) t (*_ Tuples have at least one element *)
+
+    and _ tuple =
+      | [] : unit tuple
+      | ( :: ) : 'a t * 'b tuple -> ('a * 'b) tuple
+
+    type packed = P : 'a t -> packed [@@unboxed]
+
+    module Non_tuple = struct
+      type packed = P : 'a non_tuple t -> packed [@@unboxed]
+    end
+  end
+
   module Untyped = struct
     module Axis = struct
       type t =
@@ -74,6 +112,7 @@ module Definitions = struct
         | Kind_product of t Nonempty_list.t
         | Kind_mod of t * t Nonempty_list.t
         | Comma_separated of t Nonempty_list.t
+        | Typed of t * Type.packed
     end
 
     module Value = struct
@@ -93,44 +132,6 @@ module Definitions = struct
   end
 
   module Typed = struct
-    module Type = struct
-      (*_ Note: we only provide concrete definitions for these types so that the compiler
-        knows they are distinct. They are [private] so that they can only ever be used
-        as phantom types. *)
-      type kind_ = private Kind
-      type mode_ = private Mode
-      type modality_ = private Modality
-      type alloc_ = private Alloc
-      type synchro_ = private Synchro
-
-      type _ non_tuple =
-        | Kind : kind_ non_tuple
-        | Mode : mode_ non_tuple
-        | Modality : modality_ non_tuple
-        | Alloc : alloc_ non_tuple
-        | Synchro : synchro_ non_tuple
-
-      type kind = kind_ non_tuple
-      type mode = mode_ non_tuple
-      type modality = modality_ non_tuple
-      type alloc = alloc_ non_tuple
-      type synchro = synchro_ non_tuple
-
-      type _ t =
-        | Non_tuple : 'a non_tuple -> 'a non_tuple t
-        | Tuple : ('a * 'b) tuple -> ('a * 'b) t (*_ Tuples have at least one element *)
-
-      and _ tuple =
-        | [] : unit tuple
-        | ( :: ) : 'a t * 'b tuple -> ('a * 'b) tuple
-
-      type packed = P : 'a t -> packed [@@unboxed]
-
-      module Non_tuple = struct
-        type packed = P : 'a non_tuple t -> packed [@@unboxed]
-      end
-    end
-
     module Axis = struct
       type _ singleton =
         | Kind : Type.kind singleton
@@ -143,7 +144,7 @@ module Definitions = struct
         | Singleton : 'a singleton -> 'a t
         | Set : 'a singleton -> 'a t
 
-      type packed = P : _ t -> packed
+      type packed = P : _ t -> packed [@@unboxed]
 
       module Sub_axis = struct
         module Modal = struct
@@ -151,9 +152,9 @@ module Definitions = struct
             | Locality
             | Portability
             | Contention
+            | Statefulness
             | Visibility
-            | Access
-            | Affinity
+            | Linearity
             | Uniqueness
             | Yielding
             | Forkable
@@ -180,7 +181,7 @@ module Definitions = struct
           | Alloc : Type.alloc t
           | Synchro : Type.synchro t
 
-        type packed = P : _ t -> packed
+        type packed = P : _ t -> packed [@@unboxed]
       end
 
       module Namespace = struct
@@ -345,7 +346,7 @@ module Definitions = struct
           { kind : string
           ; sexp_of_kind : 'value -> Sexp.t
           ; value : 'value
-          ; expected_type : _ Typed.Type.t
+          ; expected_type : _ Type.t
           ; expected_sets : (string, _) Typed.Expression.allow_set option
           ; hint : string option
           }
@@ -354,7 +355,7 @@ module Definitions = struct
           { kind : string
           ; sexp_of_kind : 'value -> Sexp.t
           ; value : 'value
-          ; expected_type : _ Typed.Type.t
+          ; expected_type : _ Type.t
           }
           -> t
   end
@@ -363,6 +364,26 @@ end
 module type Language = sig
   include module type of struct
     include Definitions
+  end
+
+  module Type : sig
+    include module type of struct
+      include Type
+    end
+
+    module Non_tuple : sig
+      include module type of struct
+        include Non_tuple
+      end
+    end
+
+    val sexp_of_t : _ t -> Sexp.t
+    val kind : kind t
+    val mode : mode t
+    val modality : modality t
+    val alloc : alloc t
+    val synchro : synchro t
+    val tuple2 : 'a t -> 'b t -> ('a * ('b * unit)) t
   end
 
   module Untyped : sig
@@ -418,26 +439,6 @@ module type Language = sig
   module Typed : sig
     include module type of struct
       include Typed
-    end
-
-    module Type : sig
-      include module type of struct
-        include Type
-      end
-
-      module Non_tuple : sig
-        include module type of struct
-          include Non_tuple
-        end
-      end
-
-      val sexp_of_t : _ t -> Sexp.t
-      val kind : kind t
-      val mode : mode t
-      val modality : modality t
-      val alloc : alloc t
-      val synchro : synchro t
-      val tuple2 : 'a t -> 'b t -> ('a * ('b * unit)) t
     end
 
     module Axis : sig

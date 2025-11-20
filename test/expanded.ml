@@ -430,38 +430,38 @@ module _ : sig
 
   val foo__nonportable__portable : unit
   val foo__global__local : unit
-  val foo__global__nonportable__local__portable : unit
+  val foo__global__local__nonportable__portable : unit
   val foo__portable__nonportable : unit
   val foo__portable__portable : unit
-  val foo__global__portable__local__nonportable : unit
-  val foo__global__portable__local__portable : unit
+  val foo__global__local__portable__nonportable : unit
+  val foo__global__local__portable__portable : unit
   val foo__local__global : unit
-  val foo__local__nonportable__global__portable : unit
+  val foo__local__global__nonportable__portable : unit
   val foo__local__local : unit
-  val foo__local__nonportable__local__portable : unit
-  val foo__local__portable__global__nonportable : unit
-  val foo__local__portable__global__portable : unit
-  val foo__local__portable__local__nonportable : unit
-  val foo__local__portable__local__portable : unit
+  val foo__local__local__nonportable__portable : unit
+  val foo__local__global__portable__nonportable : unit
+  val foo__local__global__portable__portable : unit
+  val foo__local__local__portable__nonportable : unit
+  val foo__local__local__portable__portable : unit
 
   [@@@ocaml.text "/*"]
 end = struct
   let foo = ()
   and foo__nonportable__portable = ()
   and foo__global__local = ()
-  and foo__global__nonportable__local__portable = ()
+  and foo__global__local__nonportable__portable = ()
   and foo__portable__nonportable = ()
   and foo__portable__portable = ()
-  and foo__global__portable__local__nonportable = ()
-  and foo__global__portable__local__portable = ()
+  and foo__global__local__portable__nonportable = ()
+  and foo__global__local__portable__portable = ()
   and foo__local__global = ()
-  and foo__local__nonportable__global__portable = ()
+  and foo__local__global__nonportable__portable = ()
   and foo__local__local = ()
-  and foo__local__nonportable__local__portable = ()
-  and foo__local__portable__global__nonportable = ()
-  and foo__local__portable__global__portable = ()
-  and foo__local__portable__local__nonportable = ()
-  and foo__local__portable__local__portable = ()
+  and foo__local__local__nonportable__portable = ()
+  and foo__local__global__portable__nonportable = ()
+  and foo__local__global__portable__portable = ()
+  and foo__local__local__portable__nonportable = ()
+  and foo__local__local__portable__portable = ()
 end
 
 [@@@end]

@@ -322,9 +322,9 @@ let%template _ : _ =
 [%%expect
   {|
 Line _, characters _-_:
-Error: [%template]: exclave_if_local is only allowed on tailcalls or
-       syntactic allocations (e.g. tuples) consisting entirely of
-       identifiers, record fields, and/or constants
+Error: [%template]: exclave_if_local is only allowed on: tailcalls; syntactic
+       allocations (e.g. tuples) consisting entirely of identifiers, record
+       fields, and/or constants; or when given a nonempty ~reasons argument.
 |}]
 
 (* [@exclave_if_local] isn't allowed on tailcalls if the arguments aren't constant. *)
@@ -333,9 +333,87 @@ let%template g _ : _ = f (Some 1) [@exclave_if_local local]
 [%%expect
   {|
 Line _, characters _-_:
-Error: [%template]: exclave_if_local is only allowed on tailcalls or
-       syntactic allocations (e.g. tuples) consisting entirely of
-       identifiers, record fields, and/or constants
+Error: [%template]: exclave_if_local is only allowed on: tailcalls; syntactic
+       allocations (e.g. tuples) consisting entirely of identifiers, record
+       fields, and/or constants; or when given a nonempty ~reasons argument.
+|}]
+
+(* [@exclave_if_local] is always allowed if an appropriate reason is provided. *)
+let%template g f : _ = f (Some 1) [@exclave_if_local local ~reasons:[ Exclave_arrows ]]
+
+[%%expect {| |}]
+
+(* [@exclave_if_local] may have multiple reasons provided *)
+let%template g f : _ =
+  f
+    (Some 1)
+  [@exclave_if_local
+    local
+      ~reasons:
+        [ Exclave_arrows; Layout_polymorphism; Mode_polymorphism; Unboxed_variants ]]
+;;
+
+[%%expect {| |}]
+
+(* [@exclave_if_local] remains not allowed if no reason is provided. *)
+let%template g _ : _ = f (Some 1) [@exclave_if_local local ~reasons:[]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [%template]: exclave_if_local is only allowed on: tailcalls; syntactic
+       allocations (e.g. tuples) consisting entirely of identifiers, record
+       fields, and/or constants; or when given a nonempty ~reasons argument.
+|}]
+
+(* [@exclave_if_local] only accepts a fixed list of reasons *)
+let%template g _ : _ = f (Some 1) [@exclave_if_local local ~reasons:[ Not_a_reason ]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Invalid exclave_if reasons (listed individually below)"
+         ("The following reasons are valid"
+          (Exclave_arrows Layout_polymorphism Mode_polymorphism
+       Unboxed_variants))))
+Line _, characters _-_:
+  ("Invalid reason" Not_a_reason)
+|}]
+
+(* ...and the error message is reasonable given multiple invalid reasons *)
+let%template g _ : _ = f (Some 1) [@exclave_if_local local ~reasons:[ No; Neither ]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Invalid exclave_if reasons (listed individually below)"
+         ("The following reasons are valid"
+          (Exclave_arrows Layout_polymorphism Mode_polymorphism
+       Unboxed_variants))))
+Line _, characters _-_:
+  ("Invalid reason" No)
+Line _, characters _-_:
+  ("Invalid reason" Neither)
+|}]
+
+(* [@exclave_if_stack] does not accept any reasons *)
+let%template g _ : _ = f (Some 1) [@exclave_if_stack stack ~reasons:[ Exclave_arrows ]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template] ("Reasons cannot be provided" (to exclave_if_stack)))
+|}]
+
+(* [@exclave_if_stack] does not accept a reasons argument *)
+let%template g _ : _ = f (Some 1) [@exclave_if_stack stack ~reasons:[]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template] ("Reasons cannot be provided" (to exclave_if_stack)))
 |}]
 
 (* [@exclave_if_local] is allowed on tailcalls if the arguments are constant constructors. *)
@@ -387,9 +465,9 @@ let%template f x = (g [@dropped]) (g x) [@exclave_if_local bad_attribute_locatio
 [%%expect
   {|
 Line _, characters _-_:
-Error: [%template]: exclave_if_local is only allowed on tailcalls or
-       syntactic allocations (e.g. tuples) consisting entirely of
-       identifiers, record fields, and/or constants
+Error: [%template]: exclave_if_local is only allowed on: tailcalls; syntactic
+       allocations (e.g. tuples) consisting entirely of identifiers, record
+       fields, and/or constants; or when given a nonempty ~reasons argument.
 |}]
 
 let%template _ : _ = f (x [@dropped]) [@mode bad_attribute_location]
@@ -1528,3 +1606,74 @@ Error: ([%template]
 [%%template [@@@alloc _ = (heap @ global, stack @ local)]]
 
 [%%expect {| |}]
+
+
+[%%template [@@@mode _ = (_, global)]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [ppx_template] syntax error: kind expression expected
+|}]
+
+(* Escape hatch for kind syntax must come with a jkind annotation. *)
+
+[%%template [@@@mode _ = ((_ : _), global)]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [ppx_template] syntax error: (_ : (_ : <kind>)) expected
+|}]
+
+(* Escape hatch for kind syntax must use [_]. *)
+
+[%%template [@@@mode _ = ((_ : ('a : value)), global)]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [ppx_template] syntax error: (_ : (_ : <kind>)) expected
+|}]
+
+(* Default kinds are unsupported. *)
+
+[%%template [@@@mode _ = ((_ : (_ : _)), global)]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [ppx_template] syntax error: kind abbreviation, mod, or product expected
+|}]
+
+(* [with]-kinds are unsupported. *)
+
+[%%template [@@@mode _ = ((_ : (_ : value mod everything with int)), global)]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [ppx_template] syntax error: kind abbreviation, mod, or product expected
+|}]
+
+(* [kind_of_] is unsupported. *)
+
+[%%template [@@@mode _ = ((_ : (_ : kind_of_ int)), global)]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [ppx_template] syntax error: kind abbreviation, mod, or product expected
+|}]
+
+(* Kind abbreviations are type checked. *)
+
+[%%template [@@@mode _ = ((_ : (_ : local)), global)]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Type mismatch" (kind expression) (value (local : Kind))
+         ("expected type" Mode) ("expected sets" singleton)))
+|}]

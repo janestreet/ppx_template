@@ -1,10 +1,10 @@
 #verbose true
 
-(* Demonstrate the behavior of name mangling, in particular with respect
-   to the default/legacy modes.
+(* Demonstrate the behavior of name mangling, in particular with respect to the
+   default/legacy modes.
 
-   Also ensures that we notice changes to mangling; while we don't guarantee
-   stability, it's still worth avoiding accidental changes. *)
+   Also ensures that we notice changes to mangling; while we don't guarantee stability,
+   it's still worth avoiding accidental changes. *)
 
 let%template[@mode
               c = (uncontended, contended)
@@ -22,19 +22,19 @@ val id__portable : 'a @ portable -> 'a @ portable = <fun>
 val id__local : local_ 'a -> local_ 'a = <fun>
 val id__local__portable : 'a @ local portable -> 'a @ local portable = <fun>
 val id__contended : 'a @ contended -> 'a @ contended = <fun>
-val id__contended__portable :
+val id__portable__contended :
   'a @ portable contended -> 'a @ portable contended = <fun>
-val id__contended__local : 'a @ local contended -> 'a @ local contended =
+val id__local__contended : 'a @ local contended -> 'a @ local contended =
   <fun>
-val id__contended__local__portable :
+val id__local__portable__contended :
   'a @ local portable contended -> 'a @ local portable contended = <fun>
 |}]
 
-(* Demonstrate the behavior of name mangling, in particular with respect
-   to the default/legacy modalities.
+(* Demonstrate the behavior of name mangling, in particular with respect to the
+   default/legacy modalities.
 
-   Also ensures that we notice changes to mangling; while we don't guarantee
-   stability, it's still worth avoiding accidental changes. *)
+   Also ensures that we notice changes to mangling; while we don't guarantee stability,
+   it's still worth avoiding accidental changes. *)
 
 module%template
   [@modality
@@ -50,12 +50,12 @@ module M__global__portable :
   sig type 'a t = { x : 'a @@ global portable; } end
 module M : sig type 'a t = { x : 'a; } end
 module M__portable : sig type 'a t = { x : 'a @@ portable; } end
-module M__contended__global :
+module M__global__contended :
   sig type 'a t = { x : 'a @@ global contended; } end
-module M__contended__global__portable :
+module M__global__portable__contended :
   sig type 'a t = { x : 'a @@ global portable contended; } end
 module M__contended : sig type 'a t = { x : 'a @@ contended; } end
-module M__contended__portable :
+module M__portable__contended :
   sig type 'a t = { x : 'a @@ portable contended; } end
 |}]
 
@@ -169,14 +169,28 @@ val access_and_visibility_mangling__stateless :
   ('i : immediate). 'i -> 'i @ stateless = <fun>
 val access_and_visibility_mangling__read : ('i : immediate). 'i @ read -> 'i =
   <fun>
-val access_and_visibility_mangling__read__observing :
+val access_and_visibility_mangling__observing__read :
   ('i : immediate). 'i @ read -> 'i @ observing = <fun>
-val access_and_visibility_mangling__read__stateless :
+val access_and_visibility_mangling__stateless__read :
   ('i : immediate). 'i @ read -> 'i @ stateless = <fun>
 val access_and_visibility_mangling__immutable :
   ('i : immediate). 'i @ immutable -> 'i = <fun>
-val access_and_visibility_mangling__immutable__observing :
+val access_and_visibility_mangling__observing__immutable :
   ('i : immediate). 'i @ immutable -> 'i @ observing = <fun>
-val access_and_visibility_mangling__immutable__stateless :
+val access_and_visibility_mangling__stateless__immutable :
   ('i : immediate). 'i @ immutable -> 'i @ stateless = <fun>
+|}]
+
+
+(* We stably sort mode variables by axis when mangling, so if two variables range over
+   multiple axes, it's possible for us to generate the same function name twice. *)
+
+let%template bad_mode_variables : 'a. 'a @ m -> 'b @ n -> unit = fun _ _ -> ()
+[@@mode m = (local, read), n = (read, local)]
+;;
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Variable bad_mode_variables__local__read is bound several times in this matching
 |}]

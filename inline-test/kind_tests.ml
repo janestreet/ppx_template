@@ -296,8 +296,8 @@ module%test [@name "miscellaneous mangling behavior"] _ = struct
   ;;
 
   (* There was a bug where the ppx tried to mangle the left-hand side of every binding,
-       regardless of whether it was [@@kind] or not. But, we also allow "polymorphic"
-       bindings of kind [value]. *)
+     regardless of whether it was [@@kind] or not. But, we also allow "polymorphic"
+     bindings of kind [value]. *)
   module%test [@name "doesn't complain about misc. let-bindings"] _ = struct
     module Nothing = struct
       type t = |
@@ -328,8 +328,8 @@ module%test [@name "expression extension"] _ = struct
       Generate.(list float)
       ~f:(fun x ->
         (* It is intentional that the first [%template] wraps a [Pexp_apply] while the
-         second wraps a [Pexp_ident] - this demonstrates how [%template] is valid for
-         all expression contexts. *)
+           second wraps a [Pexp_ident] - this demonstrates how [%template] is valid for
+           all expression contexts. *)
         [%test_result: float] [%template (id [@kind value]) x] ~expect:x;
         [%test_result: float]
           (Float_u.to_float ([%template id [@kind float64]] (Float_u.of_float x)))
@@ -376,9 +376,8 @@ module%test [@name "module bindings"] _ = struct
 
   let%test_unit "id" =
     (* Unfortunately, [Ppxlib] doesn't currently support [Pexp_letmodule] expressions as
-       an attribute context, and they don't have their own [module_binding] nodes,
-       unlike [Pexp_let] and its [Value_bindings], so we can't easily support [@@kind]
-       on them. *)
+       an attribute context, and they don't have their own [module_binding] nodes, unlike
+       [Pexp_let] and its [Value_bindings], so we can't easily support [@@kind] on them. *)
     let module%template Id_b = M.Id [@kind value] in
     let module%template Id_u = M.Id [@kind float64] in
     List.iter

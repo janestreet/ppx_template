@@ -594,12 +594,15 @@ The currently supported shapes of kinds are:
 
 * kind-abbreviations: `[@@kind k = (bits32, bits64, value)]`
 * kind-products: `[@@kind k = (value, value & value, (value & value) & value)]`
-  * note: due to a limitation in the `ppx_template` syntax, right-nested products
-    (e.g. `value & (value & value)`) are not supported
 * mode-modifiers: `[@@kind k = (value, value mod portable)]`
 
 Kind-abbreviations can be other kind-template variables, and mode-modifiers can be other
 modality-template variables.
+
+Due to a limitation in `ppx_template` syntax, right-nested products (e.g.
+`value & (value & value)`) cannot be written the same way as other kinds. Instead, one
+must use the special syntax `(_ : (_ : value & (value & value)))`. In general, any
+supported kind may be written in this form, i.e. `(_ : (_ : <kind>))`.
 
 ### Kind sets
 
@@ -694,13 +697,22 @@ For more on defining custom named kind sets, see the section on the
 The `[@@mode ...]` and related attributes can be use to template over modes. In the future,
 mode-polymorphism will be supported as a first-class type-system feature.
 
-We also support an additional attribute, `[@exclave_if_local m]`, where `m` is a
-mode-template variable (or concrete mode) expected to evaluate to either `local` or `global`.
-This attribute may only be attached to expressions. When generating bindings, the ppx will
-check if `m = local`, and if so, wrap the expression in an `exclave_`.
+We also support an additional attribute, `[@exclave_if_local m ~reasons:[...]]`, where `m`
+is a mode-template variable (or concrete mode) expected to evaluate to either `local` or
+`global`. This attribute may only be attached to expressions. When generating bindings,
+the ppx will check if `m = local`, and if so, wrap the expression in an `exclave_`.
 
-To ensure that we will be able to natively support the full feature set of this ppx in the
-compiler, we only permit `[@exclave_if_local]` to appear on two classes of expression:
+This conditional exclave will be replaced by future compiler features and so requires that
+you specify which features it is emulating. This is done using an optional labelled
+argument `~reasons`, for which a list of pre-defined reasons may be provided. Any
+non-empty subset of these may be provided. A proper application's syntax looks like:
+`[@exclave_if_local m ~reasons:[ Mode_polymorphism ]]`.
+
+The following reasons are supported:
+`[ Exclave_arrows; Layout_polymorphism; Mode_polymorphism; Unboxed_variants ]`.
+
+We additionally permit `[@exclave_if_local]` to appear without a reason on two classes of
+expression because we can identify syntactically that they will be supportd:
 
 - "Pure" syntactic allocations, such as tuples, records, or arrays
 - Tailcalls involving only bound identifiers
@@ -758,9 +770,9 @@ let%template rec map : f:('a -> 'b @ m) -> 'a list -> 'b list @ m =
 ```
 ```mdx-error
 Lines 3-5, characters 5-50:
-Error: [%template]: exclave_if_local is only allowed on tailcalls or
-       syntactic allocations (e.g. tuples) consisting entirely of
-       identifiers, record fields, and/or constants
+Error: [%template]: exclave_if_local is only allowed on: tailcalls; syntactic
+       allocations (e.g. tuples) consisting entirely of identifiers, record
+       fields, and/or constants; or when given a nonempty ~reasons argument.
 ```
 
 Instead, you can use alloc polymorphism:
@@ -832,7 +844,7 @@ values don't directly correspond to any particular part of the OCaml ast, and ar
 used by some libraries to enable polymorphism over their synchronization behavior.
 
 The motivating example for adding this is
-[`Portable_kernel.Subatomic`](https://ocaml-docs/portable_kernel/Portable_kernel/Subatomic/index.html),
+`Portable_kernel.Subatomic`,
 which allows synchronized operations over `shared` values and unsynchronized operations
 over `uncontended` values.
 

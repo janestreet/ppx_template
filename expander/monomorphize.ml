@@ -1,6 +1,7 @@
 open! Stdppx
 open! Import
 open Language.Typed
+module Type = Language.Type
 open Result.Let_syntax
 
 module Context = struct
@@ -283,11 +284,16 @@ let is_stack (alloc : (Type.alloc, Expression.singleton) Expression.t Loc.t) ~en
     | alloc -> Error (Syntax_error.createf ~loc "Unbound alloc identifier: %s" alloc))
 ;;
 
-let should_wrap_with_exclave expr ~exclave_because_stack ~exclave_because_local ~env =
+let should_wrap_with_exclave
+  expr
+  ~(exclave_because_stack : _ Attributes.Exclave_if.t option)
+  ~(exclave_because_local : _ Attributes.Exclave_if.t option)
+  ~env
+  =
   let stack_result =
     match exclave_because_stack with
     | None -> None
-    | Some alloc ->
+    | Some { expr = alloc; reasons = _ } ->
       (match is_stack alloc ~env with
        | (Ok true | Error _) as result ->
          Some
@@ -300,7 +306,7 @@ let should_wrap_with_exclave expr ~exclave_because_stack ~exclave_because_local 
   | Some result -> result
   | None ->
     (match exclave_because_local with
-     | Some mode ->
+     | Some { expr = mode; reasons } ->
        let rec is_ident_or_field_or_constant = function
          | { pexp_desc = Pexp_ident _ | Pexp_constant _ | Pexp_construct (_, None); _ } ->
            true
@@ -330,7 +336,7 @@ let should_wrap_with_exclave expr ~exclave_because_stack ~exclave_because_local 
            && List.for_all ~f:(fun (_, e) -> is_ident_or_field_or_constant e) args
          | _ -> is_pure_allocation expr
        in
-       if is_allowable
+       if is_allowable || not (List.is_empty reasons)
        then
          is_local mode ~env
          |> Result.map_error
@@ -340,9 +346,9 @@ let should_wrap_with_exclave expr ~exclave_because_stack ~exclave_because_local 
            ((* Ideally this check is conservative, which seems fine for now. *)
             Syntax_error.createf
               ~loc:expr.pexp_loc
-              "[%%template]: exclave_if_local is only allowed on tailcalls or syntactic \
+              "[%%template]: exclave_if_local is only allowed on: tailcalls; syntactic \
                allocations (e.g. tuples) consisting entirely of identifiers, record \
-               fields, and/or constants"
+               fields, and/or constants; or when given a nonempty ~reasons argument."
             |> Syntax_error_conversion.to_extension_node Expression expr)
      | None -> Ok false)
 ;;
@@ -476,8 +482,8 @@ let t ~mk_struct ~mk_sig =
     (* The [@kind] attribute can appear on various identifier nodes that reference values,
        modules, or types that were defined using [@kind]. For each node that could be such
        an identifier, we check if the [@kind] attribute is present, and if so, mangle that
-       identifier according to the provided layouts.  An error node will be created
-       instead if the attribute is attached to a node which is not an identifier. *)
+       identifier according to the provided layouts. An error node will be created instead
+       if the attribute is attached to a node which is not an identifier. *)
     method private visit_mono : type a. a Attributes.Context.mono -> Context.t -> a -> a =
       fun attr_ctx ctx node ->
         (* We can't define a single [visit] function as in [visit_poly] because we need to
@@ -553,9 +559,9 @@ let t ~mk_struct ~mk_sig =
 
     (* The [@@kind] attribute can appear on various nodes that define or declare values,
        modules, or types. For each such node, we determine what layout mappings are being
-       requested (no attribute is equivalent to [@@kind _ = value]), and for each
-       such mapping, we duplicate the definition/declaration, and mangle the
-       defined/declared name accordingly. *)
+       requested (no attribute is equivalent to [@@kind _ = value]), and for each such
+       mapping, we duplicate the definition/declaration, and mangle the defined/declared
+       name accordingly. *)
     method
       private visit_poly
       : type a
@@ -703,7 +709,7 @@ let t ~mk_struct ~mk_sig =
                                      , Some new_defaults ) ->
                                      Some
                                        (* Always use the explicit flag from the new
-                                       attribute. *)
+                                          attribute. *)
                                        (Maybe_explicit.map
                                           new_defaults
                                           ~f:(fun new_defaults ->
@@ -714,10 +720,10 @@ let t ~mk_struct ~mk_sig =
                            let ctx : Context.t =
                              { ghostify = ctx.ghostify || i > 0; env; defaults }
                            in
-                           (* The location of the include statement spans from the start of
-                              the attribute to the end of the last item in [items]. This
-                              ensures that the locations of every item is well-nested, which
-                              helps Merlin. *)
+                           (* The location of the include statement spans from the start
+                              of the attribute to the end of the last item in [items].
+                              This ensures that the locations of every item is
+                              well-nested, which helps Merlin. *)
                            wrap_include
                              ~loc:
                                { loc_start = attr_loc.loc_start
@@ -815,8 +821,8 @@ let t ~mk_struct ~mk_sig =
               | infos -> mk_struct ~loc:info.pincl_loc infos ~f:Ast_builder.pstr_include)
         | desc ->
           (* We reset the defaults here since they are supposed to act "shallowly", i.e.
-             they only apply to the current layer of structure items, not nested items.
-             In particular, this avoids poor interaction with [let%expect_test] items. *)
+             they only apply to the current layer of structure items, not nested items. In
+             particular, this avoids poor interaction with [let%expect_test] items. *)
           super#structure_item_desc { ctx with defaults = Context.Defaults.empty } desc
 
     method! signature_item ctx =

@@ -126,7 +126,7 @@ let convert mty with_ =
              | Pmty_signature sig_ ->
                let* inner_with = items sig_ in
                (* extend the path (used to express with constraints of the shape
-               [type M.t := ...] ) *)
+                  [type M.t := ...] ) *)
                let* mty = loop mty (Prefix (Path.dot path pmd_name.txt)) inner_with in
                loop mty path with_
              | Pmty_alias binding ->

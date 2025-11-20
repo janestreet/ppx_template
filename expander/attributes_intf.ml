@@ -1,6 +1,7 @@
 open! Stdppx
 open! Import
 open Language.Typed
+module Type = Language.Type
 
 module Definitions = struct
   module Poly = struct
@@ -30,6 +31,8 @@ module Definitions = struct
     | `core_type
     | `module_type
     ]
+
+  type exclave_if_w = [ `expression ]
 
   type zero_alloc_if_w =
     [ `expression
@@ -63,6 +66,26 @@ module Definitions = struct
     type 'a mono = ('a, mono_w) t
     type 'a zero_alloc_if = ('a, zero_alloc_if_w) t
     type 'a any = ('a, any_w) t
+  end
+
+  module Exclave_if = struct
+    module Reason = struct
+      type t =
+        | Exclave_arrows
+        | Layout_polymorphism
+        | Mode_polymorphism
+        | Unboxed_variants
+    end
+
+    (** Represents attributes that introduce conditional exclaves into the code. [loc] is
+        the location of the attribute's payload. [expr] is the expression (mode, alloc,
+        etc.) to compare against to determine whether to apply [[@@exclave_if_*]].
+        [reasons] is the list of reasons for applying unconditionally, out of a list of
+        pre-defined reasons. *)
+    type ('typ, 'reasons) t =
+      { expr : ('typ, Expression.singleton) Expression.t Loc.t
+      ; reasons : 'reasons
+      }
   end
 
   module Zero_alloc_if = struct
@@ -149,14 +172,25 @@ module type Attributes = sig
       Defaults to [{ kinds = []; modes = [] }]. *)
   val mono : (mono_w, Mono.t) t
 
+  module Exclave_if : sig
+    include module type of struct
+      include Exclave_if
+    end
+
+    module Reason : sig
+      include module type of struct
+        include Exclave_if.Reason
+      end
+    end
+  end
+
   (** A handler for attributes that optionally insert [exclave_] markers. We expect to
       replace these attributes with mode-polymorphic tailcalls and/or unboxed types. *)
   val exclave_if_local
-    : ([ `expression ], (Type.mode, Expression.singleton) Expression.t Loc.t option) t
+    : (exclave_if_w, (Type.mode, Exclave_if.Reason.t list) Exclave_if.t option) t
 
   (** Like {!exclave_if_local}, but for allocation identifiers. *)
-  val exclave_if_stack
-    : ([ `expression ], (Type.alloc, Expression.singleton) Expression.t Loc.t option) t
+  val exclave_if_stack : (exclave_if_w, (Type.alloc, unit) Exclave_if.t option) t
 
   module Zero_alloc_if : sig
     include module type of struct

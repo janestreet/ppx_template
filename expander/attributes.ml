@@ -3,7 +3,6 @@ open! Import
 open Language
 include Attributes_intf.Definitions
 open Result.Let_syntax
-module Type = Language.Typed.Type
 
 module type Context = sig
   type ('a, 'w) t : immediate
@@ -1059,24 +1058,114 @@ module Non_explicit = struct
   ;;
 
   module Exclave_if = struct
-    let declare name expected =
+    include Exclave_if
+
+    module Reason = struct
+      include Reason
+
+      let all =
+        [ Exclave_arrows; Layout_polymorphism; Mode_polymorphism; Unboxed_variants ]
+      ;;
+
+      let of_string : string -> t option = function
+        | "Exclave_arrows" -> Some Exclave_arrows
+        | "Layout_polymorphism" -> Some Layout_polymorphism
+        | "Mode_polymorphism" -> Some Mode_polymorphism
+        | "Unboxed_variants" -> Some Unboxed_variants
+        | _ -> None
+      ;;
+
+      let to_string : t -> string = function
+        | Exclave_arrows -> "Exclave_arrows"
+        | Layout_polymorphism -> "Layout_polymorphism"
+        | Mode_polymorphism -> "Mode_polymorphism"
+        | Unboxed_variants -> "Unboxed_variants"
+      ;;
+
+      module Error = struct
+        let syntax_error ~loc sexp =
+          Syntax_error.createf ~loc "%s" (Sexp.to_string_hum sexp)
+        ;;
+
+        let unknown_exclave_reasons ~provided ~loc =
+          let available = List (List.map all ~f:(fun x -> Atom (to_string x))) in
+          let message =
+            Sexplib0.Sexp.message
+              "Invalid exclave_if reasons (listed individually below)"
+              [ "The following reasons are valid", available ]
+          in
+          Syntax_error.combine
+            (syntax_error ~loc (List [ Atom "[%template]"; message ]))
+            (List.map provided ~f:(fun (name, loc) ->
+               syntax_error ~loc (List [ Atom "Invalid reason"; Atom name ])))
+        ;;
+
+        let cannot_have_exclave_reasons ~name ~loc =
+          let message =
+            Sexplib0.Sexp.message "Reasons cannot be provided" [ "to", Atom name ]
+          in
+          syntax_error ~loc (List [ Atom "[%template]"; message ])
+        ;;
+      end
+    end
+
+    let pattern () =
+      let open Ast_pattern in
+      let open Ast_pattern_helpers in
+      let ident = map (single_ident ()) ~f:(fun k mode -> k mode None) in
+      let ident_with_reasons =
+        pexp_apply
+          (ident_expr ())
+          ((labelled (string "reasons")
+            ** map2
+                 (as__ (elist (pexp_construct (lident __') none)))
+                 ~f:(fun expr reasons -> Some (expr.pexp_loc, reasons)))
+           ^:: nil)
+        |> single_expr_payload
+      in
+      ident ||| ident_with_reasons |> map2 ~f:(fun mode args -> mode, args)
+    ;;
+
+    let parse_reasons ~loc reasons =
+      List.map reasons ~f:(fun { txt = reason; loc } ->
+        match Reason.of_string reason with
+        | Some r -> Ok r
+        | None -> Error (reason, loc))
+      |> Result.combine_errors
+      |> Result.map_error ~f:(fun provided ->
+        Reason.Error.unknown_exclave_reasons ~provided ~loc)
+    ;;
+
+    let maybe_consume_reasons ~name:_ = function
+      | Some (loc, reasons) -> parse_reasons ~loc reasons
+      | None -> Ok []
+    ;;
+
+    let do_not_consume_reasons ~name = function
+      | None -> Ok ()
+      | Some (loc, _) -> Error (Reason.Error.cannot_have_exclave_reasons ~name ~loc)
+    ;;
+
+    let declare name expected handle_reasons =
+      let pattern = pattern () in
       declare
         ~name
         ~contexts:[ T Expression ]
-        ~pattern:(Ast_pattern_helpers.single_ident ())
-        ~k:(fun { txt = expr; loc } ->
-          (let+ expr =
-             Typed.Expression.type_check
-               expr
-               ~expected
-               ~allow_set:(Singleton_only { why_no_set = Hint.no_sets_in "exclave_if" })
-           in
-           { txt = expr; loc })
-          |> Type_error.lift_to_error_result ~loc)
+        ~pattern
+        ~k:(fun ({ txt = expr; loc = expr_loc }, reasons) ->
+          let* expr =
+            Typed.Expression.type_check
+              expr
+              ~expected
+              ~allow_set:(Singleton_only { why_no_set = Hint.no_sets_in "exclave_if" })
+            |> Type_error.lift_to_error_result ~loc:expr_loc
+          in
+          let* reasons = handle_reasons ~name reasons in
+          Ok ({ expr = { txt = expr; loc = expr_loc }; reasons } : _ Exclave_if.t))
     ;;
 
-    let local_attr = declare "exclave_if_local" Type.mode
-    let stack_attr = declare "exclave_if_stack" Type.alloc
+    let local_attr = declare "exclave_if_local" Type.mode maybe_consume_reasons
+    let stack_attr = declare "exclave_if_stack" Type.alloc do_not_consume_reasons
   end
 
   let exclave_if_local = consume_attr_if Exclave_if.local_attr
@@ -1090,7 +1179,7 @@ module Non_explicit = struct
       single_expr_payload
         (map (Ast_pattern_helpers.ident_expr ()) ~f:(fun k mode -> k mode [])
          ||| pexp_apply (Ast_pattern_helpers.ident_expr ()) (many (pair nolabel __)))
-      |> map2' ~f:(fun loc mode payload -> loc, mode, payload)
+      |> map2' ~f:(fun loc mode args -> loc, mode, args)
     ;;
 
     let declare name expected =
@@ -1098,7 +1187,7 @@ module Non_explicit = struct
         ~name
         ~contexts:[ T Expression; T Value_binding; T Value_description ]
         ~pattern:(pattern ())
-        ~k:(fun (loc, { txt = expr; loc = mode_loc }, args) ->
+        ~k:(fun (loc, { txt = expr; loc = expr_loc }, args) ->
           (let+ expr =
              Typed.Expression.type_check
                expr
@@ -1106,7 +1195,7 @@ module Non_explicit = struct
                ~allow_set:
                  (Singleton_only { why_no_set = Hint.no_sets_in "zero_alloc_if" })
            in
-           ({ loc; expr = { txt = expr; loc = mode_loc }; args } : _ Zero_alloc_if.t))
+           ({ loc; expr = { txt = expr; loc = expr_loc }; args } : _ Zero_alloc_if.t))
           |> Type_error.lift_to_error_result ~loc)
     ;;
 

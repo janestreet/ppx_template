@@ -22,3 +22,4 @@ end
 val map_error : ('a, 'b) result -> f:('b -> 'c) -> ('a, 'c) result
 val all : ('a, 'err) result list -> ('a list, 'err) result
 val collect_errors : ('a, Syntax_error.t) result list -> ('a list, Syntax_error.t) result
+val combine_errors : ('ok, 'err) result list -> ('ok list, 'err list) result
