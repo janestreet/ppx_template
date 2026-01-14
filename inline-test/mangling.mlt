@@ -19,7 +19,7 @@ let%template[@mode
   {|
 val id : 'a -> 'a = <fun>
 val id__portable : 'a @ portable -> 'a @ portable = <fun>
-val id__local : local_ 'a -> local_ 'a = <fun>
+val id__local : 'a @ local -> 'a @ local = <fun>
 val id__local__portable : 'a @ local portable -> 'a @ local portable = <fun>
 val id__contended : 'a @ contended -> 'a @ contended = <fun>
 val id__portable__contended :
@@ -45,7 +45,7 @@ end
 
 [%%expect
   {|
-module M__global : sig type 'a t = { global_ x : 'a; } end
+module M__global : sig type 'a t = { x : 'a @@ global; } end
 module M__global__portable :
   sig type 'a t = { x : 'a @@ global portable; } end
 module M : sig type 'a t = { x : 'a; } end
@@ -193,4 +193,14 @@ let%template bad_mode_variables : 'a. 'a @ m -> 'b @ n -> unit = fun _ _ -> ()
   {|
 Line _, characters _-_:
 Error: Variable bad_mode_variables__local__read is bound several times in this matching
+|}]
+
+let x = 0
+let%template y = (x [@kind k or value]) [@@kind k = (immediate, value)]
+
+[%%expect
+  {|
+val x : int = 0
+val y__immediate : int = 0
+val y : int = 0
 |}]

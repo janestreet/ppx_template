@@ -102,7 +102,8 @@ let expr =
           (* Special case: because we're using the expression language to represent kinds,
              we need to cheat and parse [a & b & c === a & (b & c)] as a flat kind. *)
           rhs
-        | (Comma_separated _ | Identifier _ | Kind_mod _ | Typed _) as rhs -> [ rhs ]
+        | (Comma_separated _ | Identifier _ | Kind_mod _ | Kind_coercion _ | Typed _) as
+          rhs -> [ rhs ]
       in
       Kind_product (lhs :: Nonempty_list.to_list rhs)
     | [%expr [%e? base] mod [%e? modifiers_exp]], _ ->
@@ -122,6 +123,7 @@ let expr =
       in
       let modifiers = Nonempty_list.map modifier_exps ~f:of_expr in
       Kind_mod (base, modifiers)
+    | [%expr [%e? lhs] or [%e? rhs]], _ -> Kind_coercion (of_expr lhs, of_expr rhs)
     | [%expr [%e? lhs] @ [%e? rhs]], _ -> Comma_separated [ of_expr lhs; of_expr rhs ]
     | _, Pexp_tuple lab_exprs ->
       Comma_separated

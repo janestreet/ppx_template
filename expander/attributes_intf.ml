@@ -71,10 +71,9 @@ module Definitions = struct
   module Exclave_if = struct
     module Reason = struct
       type t =
-        | Exclave_arrows
-        | Layout_polymorphism
-        | Mode_polymorphism
-        | Unboxed_variants
+        | May_return_local
+        | May_return_regional
+        | Will_return_unboxed
     end
 
     (** Represents attributes that introduce conditional exclaves into the code. [loc] is

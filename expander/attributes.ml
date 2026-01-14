@@ -1063,24 +1063,40 @@ module Non_explicit = struct
     module Reason = struct
       include Reason
 
-      let all =
-        [ Exclave_arrows; Layout_polymorphism; Mode_polymorphism; Unboxed_variants ]
+      (* The following introduces two *polarities* of conditional reasons dependent on
+         their ultimate fate given future language features:
+
+         - [@exclave_if_local]s with [Always]-reasons will be replaced with an [exclave].
+         - [@exclave_if_local]s with [Never]-reasons will be removed.
+
+         Hence, mixing polarities within the same [~reasons] is contradictory (we can't
+         both have and not have the [exclave] in the future). *)
+      type polarity =
+        | Always
+        | Never
+
+      let polarity = function
+        | May_return_local -> Always
+        | May_return_regional -> Never
+        | Will_return_unboxed -> Never
       ;;
 
+      let all = [ May_return_local; May_return_regional; Will_return_unboxed ]
+
       let of_string : string -> t option = function
-        | "Exclave_arrows" -> Some Exclave_arrows
-        | "Layout_polymorphism" -> Some Layout_polymorphism
-        | "Mode_polymorphism" -> Some Mode_polymorphism
-        | "Unboxed_variants" -> Some Unboxed_variants
+        | "May_return_local" -> Some May_return_local
+        | "May_return_regional" -> Some May_return_regional
+        | "Will_return_unboxed" -> Some Will_return_unboxed
         | _ -> None
       ;;
 
       let to_string : t -> string = function
-        | Exclave_arrows -> "Exclave_arrows"
-        | Layout_polymorphism -> "Layout_polymorphism"
-        | Mode_polymorphism -> "Mode_polymorphism"
-        | Unboxed_variants -> "Unboxed_variants"
+        | May_return_local -> "May_return_local"
+        | May_return_regional -> "May_return_regional"
+        | Will_return_unboxed -> "Will_return_unboxed"
       ;;
+
+      let sexp_of_list ts = List (List.map ts ~f:(fun x -> Atom (to_string x)))
 
       module Error = struct
         let syntax_error ~loc sexp =
@@ -1088,16 +1104,27 @@ module Non_explicit = struct
         ;;
 
         let unknown_exclave_reasons ~provided ~loc =
-          let available = List (List.map all ~f:(fun x -> Atom (to_string x))) in
           let message =
             Sexplib0.Sexp.message
               "Invalid exclave_if reasons (listed individually below)"
-              [ "The following reasons are valid", available ]
+              [ "The following reasons are valid", sexp_of_list all ]
           in
           Syntax_error.combine
             (syntax_error ~loc (List [ Atom "[%template]"; message ]))
             (List.map provided ~f:(fun (name, loc) ->
                syntax_error ~loc (List [ Atom "Invalid reason"; Atom name ])))
+        ;;
+
+        let contradictory_exclave_reasons ~provided_positive ~provided_negative ~loc =
+          let message =
+            Sexplib0.Sexp.message
+              "Contradictory exclave_if reasons. Some reasons imply an exclave will be \
+               required in the future, while others imply it will not."
+              [ "Always exclave", sexp_of_list provided_positive
+              ; "Never exclave", sexp_of_list provided_negative
+              ]
+          in
+          syntax_error ~loc (List [ Atom "[%template]"; message ])
         ;;
 
         let cannot_have_exclave_reasons ~name ~loc =
@@ -1134,6 +1161,21 @@ module Non_explicit = struct
       |> Result.combine_errors
       |> Result.map_error ~f:(fun provided ->
         Reason.Error.unknown_exclave_reasons ~provided ~loc)
+      |> Result.bind ~f:(fun provided ->
+        let provided_positive, provided_negative =
+          List.partition provided ~f:(fun reason ->
+            match Reason.polarity reason with
+            | Always -> true
+            | Never -> false)
+        in
+        if not (List.is_empty provided_positive || List.is_empty provided_negative)
+        then
+          Error
+            (Reason.Error.contradictory_exclave_reasons
+               ~provided_positive
+               ~provided_negative
+               ~loc)
+        else Ok provided)
     ;;
 
     let maybe_consume_reasons ~name:_ = function

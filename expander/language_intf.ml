@@ -111,6 +111,7 @@ module Definitions = struct
         | Identifier of Identifier.t
         | Kind_product of t Nonempty_list.t
         | Kind_mod of t * t Nonempty_list.t
+        | Kind_coercion of t * t
         | Comma_separated of t Nonempty_list.t
         | Typed of t * Type.packed
     end
@@ -230,6 +231,7 @@ module Definitions = struct
         | Kind_mod :
             (Type.kind, 's) t * (Type.modality, singleton) t Nonempty_list.t
             -> (Type.kind, 's) t
+        | Kind_coercion : (Type.kind, 's) t * (Type.kind, set) t -> (Type.kind, 's) t
         | Tuple :
             ('a * 'b) tuple
             -> ('a * 'b, _) t (*_ Tuples have at least one element *)

@@ -23,6 +23,11 @@ let all results =
     elt :: acc)
 ;;
 
+let all_unit results =
+  let+ (_ : unit list) = all results in
+  ()
+;;
+
 let collect_errors results =
   List.fold_right results ~init:(Ok []) ~f:(fun elt acc ->
     match elt, acc with

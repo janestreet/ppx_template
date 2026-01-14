@@ -3,6 +3,7 @@ open! Import
 open Language.Typed
 module Type = Language.Type
 open Result.Let_syntax
+include Monomorphize_intf.Definitions
 
 module Context = struct
   module Defaults = struct
@@ -410,7 +411,7 @@ let consume_zero_alloc_if
        { node with pval_attributes = attribute :: node.pval_attributes })
 ;;
 
-let t ~mk_struct ~mk_sig =
+let t ~mk_struct ~mk_sig :> Context.t t =
   let mk_struct ~loc nodes ~f =
     let loc = { loc with loc_ghost = true } in
     (mk_struct ~loc (List.map nodes ~f:(f ~loc))).pstr_desc
@@ -547,6 +548,22 @@ let t ~mk_struct ~mk_sig =
       | Ok expr -> self#visit_mono Expression ctx expr
       | Error err -> Syntax_error_conversion.to_extension_node Expression expr err
 
+    method! expression_desc ctx pexp_desc =
+      let loc =
+        content_span#expression_desc pexp_desc None |> Option.value ~default:Location.none
+      in
+      match Ppxlib_jane.Shim.Expression_desc.of_parsetree pexp_desc ~loc with
+      | Pexp_let (mutable_flag, rec_flag, bindings, expr) ->
+        self#visit_poly Value_binding ctx bindings ~f:(fun bindings ->
+          let bindings = List.map bindings ~f:Maybe_hide_in_docs.node in
+          Pexp_let
+            ( self#mutable_flag ctx mutable_flag
+            , self#rec_flag ctx rec_flag
+            , bindings
+            , self#expression ctx expr )
+          |> Ppxlib_jane.Shim.Expression_desc.to_parsetree ~loc)
+      | _ -> super#expression_desc ctx pexp_desc
+
     method! value_binding ctx vb =
       match consume_zero_alloc_if Value_binding vb ~env:ctx.env with
       | Ok vb -> super#value_binding ctx vb
@@ -611,10 +628,16 @@ let t ~mk_struct ~mk_sig =
                in
                { node; hide_in_docs = Mangle.Result.did_mangle res })
          | Error { loc = _; err; attrs = _ } ->
+           let hd_nodes, tl_nodes =
+             match nodes with
+             | hd :: tl -> hd, tl
+             | [] -> assert false
+           in
            [ { node =
                  Syntax_error_conversion.to_extension_node
                    (Attributes.Context.poly_to_any attr_ctx)
-                   (List.hd nodes)
+                   hd_nodes
+                   ~also_drop:tl_nodes
                    err
              ; hide_in_docs = true
              }
@@ -746,22 +769,6 @@ let t ~mk_struct ~mk_sig =
 
     method! structure ctx items = self#visit_floating_poly Structure_item ctx items
     method! signature_items ctx items = self#visit_floating_poly Signature_item ctx items
-
-    method! expression_desc ctx pexp_desc =
-      let loc =
-        content_span#expression_desc pexp_desc None |> Option.value ~default:Location.none
-      in
-      match Ppxlib_jane.Shim.Expression_desc.of_parsetree pexp_desc ~loc with
-      | Pexp_let (mutable_flag, rec_flag, bindings, expr) ->
-        self#visit_poly Value_binding ctx bindings ~f:(fun bindings ->
-          let bindings = List.map bindings ~f:Maybe_hide_in_docs.node in
-          Pexp_let
-            ( self#mutable_flag ctx mutable_flag
-            , self#rec_flag ctx rec_flag
-            , bindings
-            , self#expression ctx expr )
-          |> Ppxlib_jane.Shim.Expression_desc.to_parsetree ~loc)
-      | _ -> super#expression_desc ctx pexp_desc
 
     method! structure_item ctx =
       function

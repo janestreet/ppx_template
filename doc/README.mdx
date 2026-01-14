@@ -604,6 +604,51 @@ Due to a limitation in `ppx_template` syntax, right-nested products (e.g.
 must use the special syntax `(_ : (_ : value & (value & value)))`. In general, any
 supported kind may be written in this form, i.e. `(_ : (_ : <kind>))`.
 
+We additionally support a special shape of kind in `ppx_template` that has no
+corresponding OxCaml syntax:
+
+* kind-coercions: `[@kind k or value_or_null]`
+
+The kind `k1 or k2` evaluates to `k2` when `k1` is known to be a subkind of `k2`, and `k1`
+otherwise. This is useful for invoking templates that use more general kinds from
+functions that template over more specific kinds. For example, consider the function
+`foo`, which is templated over `value_or_null` and `float64` for each argument:
+
+```ocaml
+let%template foo (type (a : k1) (b : k2)) (_x : a) (_y : b) =
+  (* do some stuff *)
+  ()
+[@@kind k1 = (value_or_null, float64), k2 = (value_or_null, float64)]
+```
+
+If `bar` is templated over `value` and `float64`, it can't straightforwardly invoke `foo`'s
+templating:
+
+```ocaml
+let%template bar (type (a : k1) (b : k2)) (x : a) (y : b) =
+  (foo[@kind k1 k2]) x y;
+  (* do some stuff *)
+  ()
+[@@kind k1 = (value, float64), k2 = (value, float64)]
+```
+```mdx-error
+Line 2, characters 6-9:
+Error: Unbound value foo__value__float64
+```
+
+With kind coercions, we can use the more general `value_or_null` version of the function
+even from a `value` template.
+```ocaml
+let%template bar (type (a : k1) (b : k2)) (x : a) (y : b) =
+  (foo[@kind (k1 or value_or_null) (k2 or value_or_null)]) x y;
+  (* do some stuff *)
+  ()
+[@@kind k1 = (value, float64), k2 = (value, float64)]
+```
+
+Currently, only non-product kinds that do not involve with bounds are allowed on the right
+hand side of a coercion.
+
 ### Kind sets
 
 The `[@@kind_set ...]` and related attributes are further useful for
@@ -675,7 +720,7 @@ fact, kinds are just treated as implicit singleton sets).
 * kind-products: `&` distributes over both arguments, so e.g.
   `[@@kind k = ((value, bits64) & (bits32, word))]` is the same as
   `[@@kind k = (value & bits32, value & word, bits64 & bits32, bits64 & word)]`.
-* mode-modifiers: `mod` distributs over the kind argument, so e.g.
+* mode-modifiers: `mod` distributes over the kind argument, so e.g.
   `[@@kind k = (value, bits64) mod global]` is the same as
   `[@@kind k = (value mod global, bits64 mod global)]`.
 
@@ -700,25 +745,41 @@ mode-polymorphism will be supported as a first-class type-system feature.
 We also support an additional attribute, `[@exclave_if_local m ~reasons:[...]]`, where `m`
 is a mode-template variable (or concrete mode) expected to evaluate to either `local` or
 `global`. This attribute may only be attached to expressions. When generating bindings,
-the ppx will check if `m = local`, and if so, wrap the expression in an `exclave_`.
+the ppx will check if `m = local` and, if so, wrap the expression in an `exclave_`.
 
-This conditional exclave will be replaced by future compiler features and so requires that
-you specify which features it is emulating. This is done using an optional labelled
-argument `~reasons`, for which a list of pre-defined reasons may be provided. Any
-non-empty subset of these may be provided. A proper application's syntax looks like:
-`[@exclave_if_local m ~reasons:[ Mode_polymorphism ]]`.
+This conditional exclave will become unnecessary with future language features, but can
+be used to emulate them for now. To this end, you must specify one of a fixed set of
+scenarios. This is done using an optional labelled argument `~reasons`. A proper
+application's syntax looks like: `[@exclave_if_local m ~reasons:[ May_return_local ]]`.
 
 The following reasons are supported:
-`[ Exclave_arrows; Layout_polymorphism; Mode_polymorphism; Unboxed_variants ]`.
+
+* `May_return_local` -- used when mode-polymorphically returning a value which might be `@ local`.
+  * This usually applies when a higher-order function calls a function passed as an
+    argument and that may return a stack-allocated value.
+  * If this function itself stack-allocates a value (and [Will_return_unboxed] does not
+    apply), `[@exclave_if_stack]` might be the right choice instead.
+* `May_return_regional` -- used when returning something in the parent's region (i.e. a
+  component of one the current function's arguments).
+  * In future terms, `May_return_regional` is used when returning `@ regional`.
+* `Will_return_unboxed` -- used when a function currently stack allocates a data type
+  (e.g. `option`), but in the future it will use an unboxed data type instead (e.g.
+  `option#`).
+  * May be combined with `May_return_regional` if the (future-unboxed) data type is
+    constructed using parts of the function's arguments.
+
+Currently, the only legal combination of two reasons is
+`[@exclave_if_local m ~reasons:[ May_return_regional; Will_return_unboxed ]]`.
 
 We additionally permit `[@exclave_if_local]` to appear without a reason on two classes of
-expression because we can identify syntactically that they will be supportd:
+expression where we can syntactically identify that they will be supported:
 
-- "Pure" syntactic allocations, such as tuples, records, or arrays
-- Tailcalls involving only bound identifiers
+* "Pure" syntactic allocations, such as tuples, records, or arrays
+  * Corresponds to `Will_return_unboxed` (though consider `@exclave_if_stack`).
+* Tailcalls involving only bound identifiers
+  * Corresponds to `May_return_local` or `May_return_regional`.
 
-The former of these cases will eventually be supported by using unboxed values,
-and the latter will eventually be supported by "exclaves-on-arrows".
+It is preferrable to provide an explicit reason instead.
 
 Additionally, the `[@@zero_alloc_if_local m args...]` can be attached to any places the
 `[@zero_alloc]` attribute can be attached. If `m = local`, then the attribute is replaced

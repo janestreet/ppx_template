@@ -52,15 +52,15 @@ end
 module type S__local =
   sig
     type t
-    val call__local : local_ string -> t -> unit
-    val call_both : local_ string -> local_ string -> t -> unit
+    val call__local : string @ local -> t -> unit
+    val call_both : string @ local -> string @ local -> t -> unit
   end
 module type S =
   sig
     type t
-    val call__local : local_ string -> t -> unit
+    val call__local : string @ local -> t -> unit
     val call : string -> t -> unit
-    val call_both : string -> local_ string -> t -> unit
+    val call_both : string -> string @ local -> t -> unit
   end
 |}]
 

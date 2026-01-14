@@ -127,7 +127,13 @@ let t =
     method string suffix name =
       if Suffix.is_empty suffix
       then name, Did_not_mangle
-      else concat_with_underscores (name :: suffix.txt), Mangled
+      else (
+        let name =
+          if String.ends_with ~suffix:"#" name
+          then concat_with_underscores (String.drop_suffix name 1 :: suffix.txt) ^ "#"
+          else concat_with_underscores (name :: suffix.txt)
+        in
+        name, Mangled)
 
     method! longident suffix =
       function

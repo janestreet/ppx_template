@@ -49,6 +49,18 @@ Line _, characters _-_:
 Error: Unbound template identifier [bar] of type [(Alloc @ Mode)].
 |}]
 
+(* Regression for when unrelated code is dropped due to template error *)
+let%template[@mode m = (local, global)] f () = ()
+
+let%template[@alloc a = not_an_alloc] g () = ()
+and h () = (f [@mode local]) ()
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [not_an_alloc] of type [Alloc].
+|}]
+
 (* Duplicate jkinds for single kind variable (signature). *)
 module _ : sig
   val%template id : ('a : x). 'a -> 'a [@@kind x = (value, value)]
@@ -217,11 +229,11 @@ Error: Signature mismatch:
        The type n:int -> ('a -> 'a) -> 'a -> 'a
        is not compatible with the type n:int -> ('b -> 'b) -> 'b -> 'b
        The layout of 'a is float64
-         because of the definition of apply_n_times__float64 at file "test.mlt", lines 198-199, characters 2-31.
+         because of the definition of apply_n_times__float64 at file "test.mlt", lines 210-211, characters 2-31.
        But the layout of 'a must be a sublayout of value
-         because of the definition of apply_n_times__float64 at file "test.mlt", lines 201-202, characters 33-58.
-       File "test.mlt", lines 198-199, characters 2-31: Expected declaration
-       File "test.mlt", line 201, characters 19-32: Actual declaration
+         because of the definition of apply_n_times__float64 at file "test.mlt", lines 213-214, characters 33-58.
+       File "test.mlt", lines 210-211, characters 2-31: Expected declaration
+       File "test.mlt", line 213, characters 19-32: Actual declaration
 |}]
 
 (* Missing [@kind: l] on recursive call (as above, but with a newtype expression). *)
@@ -339,7 +351,16 @@ Error: [%template]: exclave_if_local is only allowed on: tailcalls; syntactic
 |}]
 
 (* [@exclave_if_local] is always allowed if an appropriate reason is provided. *)
-let%template g f : _ = f (Some 1) [@exclave_if_local local ~reasons:[ Exclave_arrows ]]
+
+let%template g f = f (Some 1) [@exclave_if_local local ~reasons:[ May_return_local ]]
+
+[%%expect {| |}]
+
+let%template g f = f (Some 1) [@exclave_if_local local ~reasons:[ May_return_regional ]]
+
+[%%expect {| |}]
+
+let%template g f = f (Some 1) [@exclave_if_local local ~reasons:[ Will_return_unboxed ]]
 
 [%%expect {| |}]
 
@@ -347,13 +368,43 @@ let%template g f : _ = f (Some 1) [@exclave_if_local local ~reasons:[ Exclave_ar
 let%template g f : _ =
   f
     (Some 1)
-  [@exclave_if_local
-    local
-      ~reasons:
-        [ Exclave_arrows; Layout_polymorphism; Mode_polymorphism; Unboxed_variants ]]
+  [@exclave_if_local local ~reasons:[ May_return_regional; Will_return_unboxed ]]
 ;;
 
 [%%expect {| |}]
+
+(* [@exclave_if_local] cannot have contradictory (always-never) reasons provided *)
+
+let%template g f : _ =
+  f (Some 1) [@exclave_if_local local ~reasons:[ May_return_local; May_return_regional ]]
+;;
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Contradictory exclave_if reasons. Some reasons imply an exclave
+       will be required in the future, while others imply it will not."
+         ("Always exclave" (May_return_local))
+         ("Never exclave" (May_return_regional))))
+|}]
+
+let%template g f =
+  f
+    (Some 1)
+  [@exclave_if_local
+    local ~reasons:[ May_return_local; May_return_regional; Will_return_unboxed ]]
+;;
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: ([%template]
+        ("Contradictory exclave_if reasons. Some reasons imply an exclave
+       will be required in the future, while others imply it will not."
+         ("Always exclave" (May_return_local))
+         ("Never exclave" (May_return_regional Will_return_unboxed))))
+|}]
 
 (* [@exclave_if_local] remains not allowed if no reason is provided. *)
 let%template g _ : _ = f (Some 1) [@exclave_if_local local ~reasons:[]]
@@ -375,8 +426,7 @@ Line _, characters _-_:
 Error: ([%template]
         ("Invalid exclave_if reasons (listed individually below)"
          ("The following reasons are valid"
-          (Exclave_arrows Layout_polymorphism Mode_polymorphism
-       Unboxed_variants))))
+          (May_return_local May_return_regional Will_return_unboxed))))
 Line _, characters _-_:
   ("Invalid reason" Not_a_reason)
 |}]
@@ -390,8 +440,7 @@ Line _, characters _-_:
 Error: ([%template]
         ("Invalid exclave_if reasons (listed individually below)"
          ("The following reasons are valid"
-          (Exclave_arrows Layout_polymorphism Mode_polymorphism
-       Unboxed_variants))))
+          (May_return_local May_return_regional Will_return_unboxed))))
 Line _, characters _-_:
   ("Invalid reason" No)
 Line _, characters _-_:
@@ -399,7 +448,7 @@ Line _, characters _-_:
 |}]
 
 (* [@exclave_if_stack] does not accept any reasons *)
-let%template g _ : _ = f (Some 1) [@exclave_if_stack stack ~reasons:[ Exclave_arrows ]]
+let%template g _ : _ = f (Some 1) [@exclave_if_stack stack ~reasons:[ May_return_local ]]
 
 [%%expect
   {|
@@ -1676,4 +1725,46 @@ Line _, characters _-_:
 Error: ([%template]
         ("Type mismatch" (kind expression) (value (local : Kind))
          ("expected type" Mode) ("expected sets" singleton)))
+|}]
+
+(* Kind coercion with RHS product *)
+
+[%%template
+type t [@@kind k = (value & value)]
+type t' = (t[@kind k or (value & value)]) [@@kind k = (value & (value, immediate))]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Interpreting kind products in coercions is not supported
+|}]
+
+(* Kind coercion with fake RHS *)
+
+[%%template
+type t
+type t' = (t[@kind k or imm]) [@@kind k = value_with_imm]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unrecognized kind identifier: imm
+|}]
+
+(* Kind coercion with multiple incomparable matches *)
+
+[%%template
+[@@@kind_set.define ks = (value_or_null mod separable, value_or_null mod external64)]
+
+type t [@@kind k = ks]
+type t' = (t[@kind k or ks]) [@@kind k = (value, immediate64)]]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Kind is a subkind of two incomparable coercion options:
+         immediate64
+         is subkind of (Mod value_or_null (separable))
+         and           (Mod value_or_null (external64))
+         But neither is a subkind of the other
 |}]

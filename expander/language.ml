@@ -185,6 +185,10 @@ module Untyped = struct
            let mods2 = Nonempty_list.sort_uniq ~cmp:compare mods2 in
            Nonempty_list.compare ~cmp:compare mods1 mods2
          | n -> n)
+      | Kind_coercion (kind1, coerce_to1), Kind_coercion (kind2, coerce_to2) ->
+        (match compare kind1 kind2 with
+         | 0 -> compare coerce_to1 coerce_to2
+         | n -> n)
       | Comma_separated ts1, Comma_separated ts2 ->
         Nonempty_list.compare ~cmp:compare ts1 ts2
       | Typed (t1, typ1), Typed (t2, typ2) ->
@@ -197,6 +201,8 @@ module Untyped = struct
       | _, Kind_product _ -> 1
       | Kind_mod _, _ -> -1
       | _, Kind_mod _ -> 1
+      | Kind_coercion _, _ -> -1
+      | _, Kind_coercion _ -> 1
       | Comma_separated _, _ -> -1
       | _, Comma_separated _ -> 1
       | Typed _, _ -> .
@@ -216,6 +222,8 @@ module Untyped = struct
             |> List.sort_uniq ~cmp:compare
             |> sexp_of_list sexp_of_t
           ]
+      | Kind_coercion (kind, coerce_to) ->
+        List [ Atom "Kind_coercion"; sexp_of_t kind; sexp_of_t coerce_to ]
       | Comma_separated ts ->
         List
           (Atom "Comma_separated" :: (ts |> Nonempty_list.to_list |> List.map ~f:sexp_of_t)
@@ -641,6 +649,7 @@ module Typed = struct
       | Identifier { type_; _ } -> type_
       | Kind_mod _ -> Type.kind
       | Kind_product _ -> Type.kind
+      | Kind_coercion _ -> Type.kind
       | Tuple tp -> Tuple (type_tuple tp)
       | Union (hd :: _) -> type_ hd
 
@@ -653,6 +662,7 @@ module Typed = struct
       | Identifier { ident; type_ = _ } -> Identifier { ident }
       | Kind_mod (kind, mods) -> Kind_mod (untype kind, Nonempty_list.map mods ~f:untype)
       | Kind_product kinds -> Kind_product (Nonempty_list.map kinds ~f:untype)
+      | Kind_coercion (kind, coerce_to) -> Kind_coercion (untype kind, untype coerce_to)
       | Tuple tp -> Comma_separated (untype_tuple tp)
       | Union ts -> Comma_separated (Nonempty_list.map ts ~f:untype)
 
@@ -666,6 +676,7 @@ module Typed = struct
       | Identifier ident -> Identifier ident
       | Kind_mod (kind, mods) -> Kind_mod (to_set kind, mods)
       | Kind_product kinds -> Kind_product (Nonempty_list.map kinds ~f:to_set)
+      | Kind_coercion (kind, coerce_to) -> Kind_coercion (to_set kind, coerce_to)
       | Tuple tp -> Tuple tp
       | Union ts -> Union (Nonempty_list.map ts ~f:to_set)
     ;;
@@ -721,6 +732,12 @@ module Typed = struct
                       { why_no_set = "sets not allowed inside [kind mod] modalities" }))
         in
         Kind_mod (kind, mods)
+      | Kind_coercion (kind, coerce_to), Non_tuple Kind ->
+        let* kind = type_check kind ~expected ~allow_set in
+        let+ coerce_to = type_check coerce_to ~expected ~allow_set:Set_or_singleton in
+        Kind_coercion (kind, coerce_to)
+      | (Kind_coercion _ as value), expected ->
+        type_mismatch ~value ~expected ~allow_set ()
       | (Kind_mod _ as value), expected -> type_mismatch ~value ~expected ~allow_set ()
       | Comma_separated untyped_tp, Tuple type_tp ->
         let* vec =
@@ -936,6 +953,19 @@ module Typed = struct
         | Singleton : 'a -> ('a, [ `one ]) t
         | Set : 'a Nonempty_list.t -> ('a, [ `many ]) t
 
+      let map_res
+        : type a b r e. (a, r) t -> f:(a -> (b, e) result) -> ((b, r) t, e) result
+        =
+        fun t ~f ->
+        match t with
+        | Singleton value ->
+          let+ value = f value in
+          Singleton value
+        | Set value ->
+          let+ value = Nonempty_list.map_result value ~f in
+          Set value
+      ;;
+
       let map : type a b r. (a, r) t -> f:(a -> b) -> (b, r) t =
         fun t ~f ->
         match t with
@@ -1021,6 +1051,34 @@ module Typed = struct
       end
     end
 
+    include struct
+      open Ppx_helpers.Ox
+
+      let rec interpret_kind
+        : loc:location -> Type.kind Value.t -> (Kind.t, Syntax_error.t) result
+        =
+        fun ~loc -> function
+        | Identifier { ident; type_ = _ } ->
+          (try Ok (Kind.of_ident_exn ~ident) with
+           | _ ->
+             Error (Syntax_error.createf ~loc "Unrecognized kind identifier: %s" ident))
+        | Kind_product _ ->
+          Error
+            (Syntax_error.createf
+               ~loc
+               "Interpreting kind products in coercions is not supported")
+        | Kind_mod (kind, mods) ->
+          let* kind = interpret_kind ~loc kind in
+          let+ mods =
+            Nonempty_list.map_result mods ~f:(fun (Identifier { ident; type_ = _ }) ->
+              try Ok (Jkind_mod.of_string ident) with
+              | _ -> Error (Syntax_error.createf ~loc "Unrecognized crossing: %s" ident))
+            >>| Nonempty_list.to_list
+          in
+          Kind.apply_mods kind (Jkind_modifiers.of_jkind_mods mods)
+      ;;
+    end
+
     let rec eval_general
       : type a s r.
         t
@@ -1049,6 +1107,73 @@ module Typed = struct
         in
         let mods = Nonempty_list.sort_uniq ~cmp:Value.compare mods in
         Eval_result.map kind ~f:(fun kind : _ Value.t -> Kind_mod (kind, mods))
+      | Kind_coercion (kind, coerce_to) ->
+        let* kind = eval_general env ~loc eval_witness kind in
+        let* (Set coerce_to) =
+          eval_general
+            env
+            ~loc
+            (Eval_result.Witness.explicit_set ~lookup:Expand_atoms_bound_to_sets)
+            coerce_to
+        in
+        let* coerce_to =
+          coerce_to
+          |> Nonempty_list.map_result ~f:(fun kind ->
+            let+ interpreted = interpret_kind ~loc kind in
+            kind, interpreted)
+          >>| Nonempty_list.to_list
+        in
+        Eval_result.map_res kind ~f:(fun kind ->
+          match interpret_kind ~loc kind with
+          | Error _ ->
+            (* Permit invalid kinds on the LHS of the coercion *)
+            Ok kind
+          | Ok interpreted ->
+            (match
+               List.filter coerce_to ~f:(fun (_, coerce_to) ->
+                 Ppx_helpers.Ox.Kind.is_subkind interpreted ~of_:coerce_to)
+             with
+             | [] -> Ok kind
+             | hd :: tl as coerced_to ->
+               let+ () =
+                 (* If there is more than one coercion result, we want to assert that they
+                    are all comparable, then take the most specific. If the coercions are
+                    not comparable, we error. *)
+                 List.map coerced_to ~f:(fun (val1, k1) ->
+                   (* We do double the work here, but that's fine, these lists are always
+                      small *)
+                   List.map coerced_to ~f:(fun (val2, k2) ->
+                     if not
+                          Ppx_helpers.Ox.Kind.(
+                            is_subkind k1 ~of_:k2 || is_subkind k2 ~of_:k1)
+                     then (
+                       let to_string kind =
+                         kind
+                         |> Value.untype
+                         |> Untyped.Value.sexp_of_t
+                         |> Sexplib0.Sexp.to_string_hum
+                       in
+                       Error
+                         (Syntax_error.createf
+                            ~loc
+                            "Kind is a subkind of two incomparable coercion options:\n\
+                            \  %s\n\
+                            \  is subkind of %s\n\
+                            \  and           %s\n\
+                            \  But neither is a subkind of the other\n"
+                            (to_string kind)
+                            (to_string val1)
+                            (to_string val2)))
+                     else Ok ())
+                   |> Result.all_unit)
+                 |> Result.all_unit
+               in
+               (* Take the most specific kind *)
+               let res, _ =
+                 List.fold_left tl ~init:hd ~f:(fun ((_, k1) as min) ((_, k2) as el) ->
+                   if Ppx_helpers.Ox.Kind.is_subkind k1 ~of_:k2 then min else el)
+               in
+               res))
       | Tuple tp ->
         let+ tp = eval_tuple env ~loc tp in
         let value : _ Value.t = Tuple tp in
