@@ -18,8 +18,10 @@ let explicitly_drop =
   end
 ;;
 
-let to_extension_node : type a. a Attributes.Context.any -> a -> Syntax_error.t -> a =
-  fun ctx node t ->
+let to_extension_node
+  : type a. ?also_drop:a list -> a Attributes.Context.any -> a -> Syntax_error.t -> a
+  =
+  fun ?(also_drop = []) ctx node t ->
   let extension, loc, explicitly_drop =
     match ctx with
     | Expression ->
@@ -69,11 +71,13 @@ let to_extension_node : type a. a Attributes.Context.any -> a -> Syntax_error.t 
           | Right mty -> Right (explicitly_drop#module_type mty)) )
   in
   let loc = { loc with loc_ghost = true } in
-  (* We run [explicitly_drop] on both the original node that we are replacing and on the
-     error-containing node that we are creating.
+  (* We run [explicitly_drop] on both the original node(s) that we are replacing and on
+     the error-containing node that we are creating.
      1. We run it on the input node so that any attributes that are being removed from the
-        AST without opportunity for further processing are [make_as_handled_manually]ed.
-     2. We run it on the output node so that we delete any attributes that are still
+        AST without opportunity for further processing are [mark_as_handled_manually]ed.
+     2. We run it on any sibling nodes that are dropped along the way, if provided via
+        [also_drop].
+     3. We run it on the output node so that we delete any attributes that are still
         around (e.g. because they are "outside" the part that was replaced by the error)
         and mark all locations as ghost.
 
@@ -82,6 +86,7 @@ let to_extension_node : type a. a Attributes.Context.any -> a -> Syntax_error.t 
      match above would be extra noisy.
   *)
   let _ : a = explicitly_drop node in
+  let _ : a list = List.map also_drop ~f:explicitly_drop in
   extension ~loc (Syntax_error.to_extension t) |> explicitly_drop
 ;;
 

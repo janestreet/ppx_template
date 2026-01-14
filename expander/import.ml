@@ -6,6 +6,7 @@ include struct
     include Ast_pattern
 
     let fail = Ppxlib__.Ast_pattern0.fail
+    let pexp_hole = (T (fun _ loc _ _ -> fail loc "unsupported: pexp_hole") : _ t)
   end
 
   module Attribute = Attribute

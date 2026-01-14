@@ -1,7 +1,7 @@
 open! Ppx_template_test_common
 
-(* Define [Applicative] with a [Make] functor polymorphic over the portability
-   of the functions. *)
+(* Define [Applicative] with a [Make] functor polymorphic over the portability of the
+   functions. *)
 module Applicative = struct
   module type Arg = sig
     type 'a t
@@ -23,8 +23,8 @@ module Applicative = struct
   end
 end
 
-(* Define [Monad] with a [Make] functor polymorphic over the portability
-   of the functions using the corresponding [Applicative.Make] functor. *)
+(* Define [Monad] with a [Make] functor polymorphic over the portability of the functions
+   using the corresponding [Applicative.Make] functor. *)
 module Monad : sig
   module type Arg = sig
     type 'a t

@@ -68,7 +68,7 @@ module type%template T = sig
   (* equivalently: *)
   val t_of_sexp : Sexp.t -> t
   val sexp_of_t : t @ m -> Sexp.t @ m
-  [@@alloc __ @ m = (heap @ global, stack @ local)]
+  [@@alloc _ @ m = (heap @ global, stack @ local)]
 
   (* When multiple items are being templated over the same parameters, you can
      avoid repetition by using a toplevel attribute, which applies to all items
@@ -110,9 +110,9 @@ module%template T : T = struct
 
   let t_of_sexp _ = failwith "unimplemented"
 
-  (* The [__] symbol is often used to ignore the parameter when it can be inferred by the
+  (* The [_] symbol is often used to ignore the parameter when it can be inferred by the
      type-checker *)
-  [@@@mode.default __ = (nonportable, portable)]
+  [@@@mode.default _ = (nonportable, portable)]
 
   let construct_tuple a b = (a, b)
   let tuple_fst (a, _) = a
@@ -594,12 +594,60 @@ The currently supported shapes of kinds are:
 
 * kind-abbreviations: `[@@kind k = (bits32, bits64, value)]`
 * kind-products: `[@@kind k = (value, value & value, (value & value) & value)]`
-  * note: due to a limitation in the `ppx_template` syntax, right-nested products
-    (e.g. `value & (value & value)`) are not supported
 * mode-modifiers: `[@@kind k = (value, value mod portable)]`
 
 Kind-abbreviations can be other kind-template variables, and mode-modifiers can be other
 modality-template variables.
+
+Due to a limitation in `ppx_template` syntax, right-nested products (e.g.
+`value & (value & value)`) cannot be written the same way as other kinds. Instead, one
+must use the special syntax `(_ : (_ : value & (value & value)))`. In general, any
+supported kind may be written in this form, i.e. `(_ : (_ : <kind>))`.
+
+We additionally support a special shape of kind in `ppx_template` that has no
+corresponding OxCaml syntax:
+
+* kind-coercions: `[@kind k or value_or_null]`
+
+The kind `k1 or k2` evaluates to `k2` when `k1` is known to be a subkind of `k2`, and `k1`
+otherwise. This is useful for invoking templates that use more general kinds from
+functions that template over more specific kinds. For example, consider the function
+`foo`, which is templated over `value_or_null` and `float64` for each argument:
+
+```ocaml
+let%template foo (type (a : k1) (b : k2)) (_x : a) (_y : b) =
+  (* do some stuff *)
+  ()
+[@@kind k1 = (value_or_null, float64), k2 = (value_or_null, float64)]
+```
+
+If `bar` is templated over `value` and `float64`, it can't straightforwardly invoke `foo`'s
+templating:
+
+```ocaml
+let%template bar (type (a : k1) (b : k2)) (x : a) (y : b) =
+  (foo[@kind k1 k2]) x y;
+  (* do some stuff *)
+  ()
+[@@kind k1 = (value, float64), k2 = (value, float64)]
+```
+```mdx-error
+Line 2, characters 6-9:
+Error: Unbound value foo__value__float64
+```
+
+With kind coercions, we can use the more general `value_or_null` version of the function
+even from a `value` template.
+```ocaml
+let%template bar (type (a : k1) (b : k2)) (x : a) (y : b) =
+  (foo[@kind (k1 or value_or_null) (k2 or value_or_null)]) x y;
+  (* do some stuff *)
+  ()
+[@@kind k1 = (value, float64), k2 = (value, float64)]
+```
+
+Currently, only non-product kinds that do not involve with bounds are allowed on the right
+hand side of a coercion.
 
 ### Kind sets
 
@@ -672,7 +720,7 @@ fact, kinds are just treated as implicit singleton sets).
 * kind-products: `&` distributes over both arguments, so e.g.
   `[@@kind k = ((value, bits64) & (bits32, word))]` is the same as
   `[@@kind k = (value & bits32, value & word, bits64 & bits32, bits64 & word)]`.
-* mode-modifiers: `mod` distributs over the kind argument, so e.g.
+* mode-modifiers: `mod` distributes over the kind argument, so e.g.
   `[@@kind k = (value, bits64) mod global]` is the same as
   `[@@kind k = (value mod global, bits64 mod global)]`.
 
@@ -694,19 +742,44 @@ For more on defining custom named kind sets, see the section on the
 The `[@@mode ...]` and related attributes can be use to template over modes. In the future,
 mode-polymorphism will be supported as a first-class type-system feature.
 
-We also support an additional attribute, `[@exclave_if_local m]`, where `m` is a
-mode-template variable (or concrete mode) expected to evaluate to either `local` or `global`.
-This attribute may only be attached to expressions. When generating bindings, the ppx will
-check if `m = local`, and if so, wrap the expression in an `exclave_`.
+We also support an additional attribute, `[@exclave_if_local m ~reasons:[...]]`, where `m`
+is a mode-template variable (or concrete mode) expected to evaluate to either `local` or
+`global`. This attribute may only be attached to expressions. When generating bindings,
+the ppx will check if `m = local` and, if so, wrap the expression in an `exclave_`.
 
-To ensure that we will be able to natively support the full feature set of this ppx in the
-compiler, we only permit `[@exclave_if_local]` to appear on two classes of expression:
+This conditional exclave will become unnecessary with future language features, but can
+be used to emulate them for now. To this end, you must specify one of a fixed set of
+scenarios. This is done using an optional labelled argument `~reasons`. A proper
+application's syntax looks like: `[@exclave_if_local m ~reasons:[ May_return_local ]]`.
 
-- "Pure" syntactic allocations, such as tuples, records, or arrays
-- Tailcalls involving only bound identifiers
+The following reasons are supported:
 
-The former of these cases will eventually be supported by using unboxed values,
-and the latter will eventually be supported by "exclaves-on-arrows".
+* `May_return_local` -- used when mode-polymorphically returning a value which might be `@ local`.
+  * This usually applies when a higher-order function calls a function passed as an
+    argument and that may return a stack-allocated value.
+  * If this function itself stack-allocates a value (and [Will_return_unboxed] does not
+    apply), `[@exclave_if_stack]` might be the right choice instead.
+* `May_return_regional` -- used when returning something in the parent's region (i.e. a
+  component of one the current function's arguments).
+  * In future terms, `May_return_regional` is used when returning `@ regional`.
+* `Will_return_unboxed` -- used when a function currently stack allocates a data type
+  (e.g. `option`), but in the future it will use an unboxed data type instead (e.g.
+  `option#`).
+  * May be combined with `May_return_regional` if the (future-unboxed) data type is
+    constructed using parts of the function's arguments.
+
+Currently, the only legal combination of two reasons is
+`[@exclave_if_local m ~reasons:[ May_return_regional; Will_return_unboxed ]]`.
+
+We additionally permit `[@exclave_if_local]` to appear without a reason on two classes of
+expression where we can syntactically identify that they will be supported:
+
+* "Pure" syntactic allocations, such as tuples, records, or arrays
+  * Corresponds to `Will_return_unboxed` (though consider `@exclave_if_stack`).
+* Tailcalls involving only bound identifiers
+  * Corresponds to `May_return_local` or `May_return_regional`.
+
+It is preferrable to provide an explicit reason instead.
 
 Additionally, the `[@@zero_alloc_if_local m args...]` can be attached to any places the
 `[@zero_alloc]` attribute can be attached. If `m = local`, then the attribute is replaced
@@ -758,9 +831,9 @@ let%template rec map : f:('a -> 'b @ m) -> 'a list -> 'b list @ m =
 ```
 ```mdx-error
 Lines 3-5, characters 5-50:
-Error: [%template]: exclave_if_local is only allowed on tailcalls or
-       syntactic allocations (e.g. tuples) consisting entirely of
-       identifiers, record fields, and/or constants
+Error: [%template]: exclave_if_local is only allowed on: tailcalls; syntactic
+       allocations (e.g. tuples) consisting entirely of identifiers, record
+       fields, and/or constants; or when given a nonempty ~reasons argument.
 ```
 
 Instead, you can use alloc polymorphism:
@@ -804,10 +877,9 @@ end
 
 module type T = sig
   val f : 'a @ m -> 'a @ m
-  [@@alloc __ @ m = (heap_global, stack_local)]
-  (* You can use [__] to ignore a template variable; this will still mangle the duplicate [f] and
-     mangle the name, but makes it clear that the alloc variable isn't used.
-     Side note: single [_] doesn't work due to how the syntax is implemented. *)
+  [@@alloc _ @ m = (heap_global, stack_local)]
+  (* You can use [_] to ignore a template variable; this will still mangle the duplicate [f] and
+     mangle the name, but makes it clear that the alloc variable isn't used. *)
 end
 ]
 ```
@@ -833,7 +905,7 @@ values don't directly correspond to any particular part of the OCaml ast, and ar
 used by some libraries to enable polymorphism over their synchronization behavior.
 
 The motivating example for adding this is
-[`Portable_kernel.Subatomic`](https://ocaml-docs/portable_kernel/Portable_kernel/Subatomic/index.html),
+`Portable_kernel.Subatomic`,
 which allows synchronized operations over `shared` values and unsynchronized operations
 over `uncontended` values.
 
@@ -1035,13 +1107,12 @@ Instead, a trick for this is to write a binding which is polymorphic over exactl
 kind - for example, to bind `Float` and `Float__float64` modules, one might write:
 
 ```ocaml
-module%template [@kind __ = value] Float = Float (* alternatively, [@@kind __ = value] *)
-module%template [@kind __ = float64] Float = Float_u
+module%template [@kind _ = value] Float = Float (* alternatively, [@@kind _ = value] *)
+module%template [@kind _ = float64] Float = Float_u
 ```
 
-Here, `__` is just an identifier, nothing special, but seems like a good way to indicate
-that a given kind variable is unused in the body of the binding. In these cases, you might
-prefer to use punning to avoid the extra syntax clutter:
+Here, `_` indicates that a given kind variable is unused in the body of the binding. In
+these cases, you might prefer to use punning to avoid the extra syntax clutter:
 
 ```ocaml
 module%template [@kind value] Float = Float (* alternatively, [@@kind value] *)

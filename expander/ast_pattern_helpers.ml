@@ -14,7 +14,7 @@ let map_pat { pat } ~f = { pat = (fun () -> map1 (pat ()) ~f) }
 let at_most_one_pattern p = p ^:: nil ||| map0 nil ~f:[]
 let at_most_one_eval p = pstr (at_most_one_pattern (pstr_eval p nil))
 
-let ident' =
+let ident_pattern =
   { pat =
       (fun () ->
         pexp_ident
@@ -25,7 +25,8 @@ let ident' =
                   of alloc-poly (otherwise, [[@@alloc a = heap]] can be parsed as a punned
                   binding with the identifiers [( = )], [a], and [heap]). *)
                Ast_pattern.fail loc ("Invalid ppx_template identifier: " ^ ident)
-             | _ -> { txt = { Identifier.ident }; loc })))
+             | _ -> Pattern.Identifier { ident }))
+        ||| map0 pexp_hole ~f:Pattern.Wildcard)
   }
 ;;
 
@@ -38,8 +39,6 @@ let pexp_tuple p =
       | hd :: (_ :: _ as tl) -> (hd :: tl : _ Nonempty_list.t))
 ;;
 
-let ident = map_pat ident' ~f:Loc.txt
-let ident_pattern = map_pat ident ~f:(fun ident -> Pattern.Identifier ident)
 let one_or_many a b = map1 a ~f:(fun x -> [ x ]) ||| b
 let tuple_or_one p = pexp_tuple p ||| map1 p ~f:(fun x : _ Nonempty_list.t -> [ x ])
 let one_or_tuple p = map1 p ~f:(fun x : _ Nonempty_list.t -> [ x ]) ||| pexp_tuple p
@@ -73,17 +72,38 @@ let expr =
       | [] -> ()
     in
     match expr, Ppxlib_jane.Shim.Expression_desc.of_parsetree ~loc pexp_desc with
+    | _, Pexp_constraint ({ pexp_desc; pexp_loc; _ }, Some { ptyp_desc; _ }, []) ->
+      (match
+         ( Ppxlib_jane.Shim.Expression_desc.of_parsetree ~loc:pexp_loc pexp_desc
+         , Ppxlib_jane.Shim.Core_type_desc.of_parsetree ptyp_desc )
+       with
+       | Pexp_hole, Ptyp_any (Some jkind) ->
+         let rec of_jkind : jkind_annotation -> Expression.t = function
+           | { pjkind_desc = Pjk_abbreviation ident; _ } ->
+             Typed (Identifier { ident }, P (Non_tuple Kind))
+           | { pjkind_desc = Pjk_mod (jkind, mode :: modes); _ } ->
+             let modes =
+               Nonempty_list.map (mode :: modes) ~f:(fun { txt = Mode ident; _ } ->
+                 Expression.Identifier { ident })
+             in
+             Kind_mod (of_jkind jkind, modes)
+           | { pjkind_desc = Pjk_product (jkind :: jkinds); _ } ->
+             Kind_product (Nonempty_list.map (jkind :: jkinds) ~f:of_jkind)
+           | { pjkind_loc = loc; _ } -> expected ~loc "kind abbreviation, mod, or product"
+         in
+         of_jkind jkind
+       | _ -> expected ~loc "(_ : (_ : <kind>))")
     | _, Pexp_ident { txt = Lident ident; _ } -> Identifier { ident }
     | [%expr [%e? lhs] & [%e? rhs]], _ ->
       let lhs = of_expr lhs in
       let rhs =
         match of_expr rhs with
         | Kind_product rhs ->
-          (* Special case: because we're using the expression language to represent
-             kinds, we need to cheat and parse [a & b & c === a & (b & c)] as a flat
-             kind. *)
+          (* Special case: because we're using the expression language to represent kinds,
+             we need to cheat and parse [a & b & c === a & (b & c)] as a flat kind. *)
           rhs
-        | (Comma_separated _ | Identifier _ | Kind_mod _) as rhs -> [ rhs ]
+        | (Comma_separated _ | Identifier _ | Kind_mod _ | Kind_coercion _ | Typed _) as
+          rhs -> [ rhs ]
       in
       Kind_product (lhs :: Nonempty_list.to_list rhs)
     | [%expr [%e? base] mod [%e? modifiers_exp]], _ ->
@@ -103,6 +123,7 @@ let expr =
       in
       let modifiers = Nonempty_list.map modifier_exps ~f:of_expr in
       Kind_mod (base, modifiers)
+    | [%expr [%e? lhs] or [%e? rhs]], _ -> Kind_coercion (of_expr lhs, of_expr rhs)
     | [%expr [%e? lhs] @ [%e? rhs]], _ -> Comma_separated [ of_expr lhs; of_expr rhs ]
     | _, Pexp_tuple lab_exprs ->
       Comma_separated
@@ -119,8 +140,8 @@ let expr =
   in
   { pat =
       (fun () ->
-        Ast_pattern.of_func (fun (_ : Ast_pattern.context) loc expr k ->
-          k { txt = of_expr expr; loc }))
+        Ast_pattern.of_func (fun (_ : Ast_pattern.context) (_ : location) expr k ->
+          k { txt = of_expr expr; loc = expr.pexp_loc }))
   }
 ;;
 
@@ -148,12 +169,9 @@ let binding =
   }
 ;;
 
-(* Parses an [expression] of the form [a] as [<generated symbol>, [ "a" ]]. *)
+(* Parses an [expression] of the form [a] as [_, [ "a" ]]. *)
 let punned_binding =
-  map_pat expr ~f:(fun expr ->
-    let ident = Ppxlib.gen_symbol ~prefix:"binding" () in
-    let pattern = Pattern.Identifier { ident } in
-    pattern, ([ expr ] : _ Nonempty_list.t))
+  map_pat expr ~f:(fun expr -> Pattern.Wildcard, ([ expr ] : _ Nonempty_list.t))
 ;;
 
 let single_ident () = pstr (pstr_eval (expr.pat ()) nil ^:: nil)

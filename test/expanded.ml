@@ -430,38 +430,38 @@ module _ : sig
 
   val foo__nonportable__portable : unit
   val foo__global__local : unit
-  val foo__global__nonportable__local__portable : unit
+  val foo__global__local__nonportable__portable : unit
   val foo__portable__nonportable : unit
   val foo__portable__portable : unit
-  val foo__global__portable__local__nonportable : unit
-  val foo__global__portable__local__portable : unit
+  val foo__global__local__portable__nonportable : unit
+  val foo__global__local__portable__portable : unit
   val foo__local__global : unit
-  val foo__local__nonportable__global__portable : unit
+  val foo__local__global__nonportable__portable : unit
   val foo__local__local : unit
-  val foo__local__nonportable__local__portable : unit
-  val foo__local__portable__global__nonportable : unit
-  val foo__local__portable__global__portable : unit
-  val foo__local__portable__local__nonportable : unit
-  val foo__local__portable__local__portable : unit
+  val foo__local__local__nonportable__portable : unit
+  val foo__local__global__portable__nonportable : unit
+  val foo__local__global__portable__portable : unit
+  val foo__local__local__portable__nonportable : unit
+  val foo__local__local__portable__portable : unit
 
   [@@@ocaml.text "/*"]
 end = struct
   let foo = ()
   and foo__nonportable__portable = ()
   and foo__global__local = ()
-  and foo__global__nonportable__local__portable = ()
+  and foo__global__local__nonportable__portable = ()
   and foo__portable__nonportable = ()
   and foo__portable__portable = ()
-  and foo__global__portable__local__nonportable = ()
-  and foo__global__portable__local__portable = ()
+  and foo__global__local__portable__nonportable = ()
+  and foo__global__local__portable__portable = ()
   and foo__local__global = ()
-  and foo__local__nonportable__global__portable = ()
+  and foo__local__global__nonportable__portable = ()
   and foo__local__local = ()
-  and foo__local__nonportable__local__portable = ()
-  and foo__local__portable__global__nonportable = ()
-  and foo__local__portable__global__portable = ()
-  and foo__local__portable__local__nonportable = ()
-  and foo__local__portable__local__portable = ()
+  and foo__local__local__nonportable__portable = ()
+  and foo__local__global__portable__nonportable = ()
+  and foo__local__global__portable__portable = ()
+  and foo__local__local__portable__nonportable = ()
+  and foo__local__local__portable__portable = ()
 end
 
 [@@@end]
@@ -602,6 +602,48 @@ module type S = sig
     [@@@ocaml.text "/*"]
   end
   [@@ocaml.doc " @inline "]
+end
+
+[@@@end]
+
+[@@@expand_inline
+  let x = {| wildcard patterns smoke test |}
+
+  module%template _ : sig
+    val id : 'a. 'a -> 'a
+    [@@kind (f, s) = ((float64, bits64), (bits64, float64))]
+    [@@mode l = (global, local), v = (read_write, read)]
+  end = struct
+    let id x = x
+    [@@kind (_, _) = ((float64, bits64), (bits64, float64))]
+    [@@mode _ = (global, local), _ = (read_write, read)]
+    ;;
+  end]
+
+let x = {| wildcard patterns smoke test |}
+
+module _ : sig
+  [@@@ocaml.text "/*"]
+
+  val id__float64 : 'a. 'a -> 'a
+  val id__float64__read : 'a. 'a -> 'a
+  val id__float64__local : 'a. 'a -> 'a
+  val id__float64__local__read : 'a. 'a -> 'a
+  val id__bits64 : 'a. 'a -> 'a
+  val id__bits64__read : 'a. 'a -> 'a
+  val id__bits64__local : 'a. 'a -> 'a
+  val id__bits64__local__read : 'a. 'a -> 'a
+
+  [@@@ocaml.text "/*"]
+end = struct
+  let id__float64 x = x
+  and id__float64__read x = x
+  and id__float64__local x = x
+  and id__float64__local__read x = x
+  and id__bits64 x = x
+  and id__bits64__read x = x
+  and id__bits64__local x = x
+  and id__bits64__local__read x = x
 end
 
 [@@@end]

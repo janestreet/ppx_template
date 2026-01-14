@@ -7,7 +7,7 @@ open! Ppx_template_test_common
     type 'a t = 'a list
 
     [%%template:
-    [@@@alloc.default __ @ m_out = (heap_global, stack_local)]
+    [@@@alloc.default _ @ m_out = (heap_global, stack_local)]
 
     (* [cons] can't implement [local -> heap] *)
     [@@@mode.default m_in = (global, m_out)]

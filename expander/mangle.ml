@@ -1,6 +1,7 @@
 open! Stdppx
 open! Import
 open Language.Typed
+module Type = Language.Type
 
 (* Individual values are mangled based on their structures, and then concatenated together
    with double-underscores. *)
@@ -31,48 +32,30 @@ module Suffix = struct
 
   let create mono =
     let extract axis =
-      match (Axis.Map.find_opt (P axis) mono : _ Maybe_explicit.t option) with
+      match Axis.Map.find_opt (P axis) mono with
       | None -> []
-      | Some (Explicit, manglers) ->
-        List.map manglers ~f:(fun (Value.Basic.P value) -> mangle_value value)
-      | Some (Drop_axis_if_all_defaults, manglers) ->
-        (* A map from axis to manglers. This is general because non-mode manglers should
-           end up with a single axis. Non-mode axes can be specified in the future if
-           necessary. *)
-        let is_axis_all_default =
-          List.fold_left
-            manglers
-            ~init:Axis.Sub_axis.Map.empty
-            ~f:(fun map (Value.Basic.P value) ->
-              Axis.Sub_axis.Map.add_to_list
-                (P (Axis.Sub_axis.of_value value))
-                (Value.is_default value)
-                map)
-          |> Axis.Sub_axis.Map.map (List.for_all ~f:Fn.id)
-        in
-        let manglers =
-          List.filter manglers ~f:(fun (Value.Basic.P value) ->
-            let axis = Axis.Sub_axis.of_value value in
-            let is_all_default =
-              (* We check whether an axis is all defaults, as we don't include those in the
-                 name mangling scheme.
-
-                 By construction, this is guaranteed to exist. We use the same axes in
-                 manglers to create and access the map.
-              *)
-              Axis.Sub_axis.Map.find (P axis) is_axis_all_default
-            in
-            not is_all_default)
-        in
-        let set_mangling =
-          (* sets are surrounded with additional [''] to disambiguate from the non-set
-             versions *)
-          match axis with
-          | Set _ -> "''"
-          | Singleton _ -> ""
-        in
-        List.map manglers ~f:(fun (Value.Basic.P value) ->
-          String.concat ~sep:"" [ set_mangling; mangle_value value; set_mangling ])
+      | Some (explicitness, manglers) ->
+        List.fold_right
+          manglers
+          ~init:Axis.Sub_axis.Map.empty
+          ~f:(fun (Value.Basic.P value as mangler) map ->
+            Axis.Sub_axis.Map.add_to_list (P (Axis.Sub_axis.of_value value)) mangler map)
+        |> Axis.Sub_axis.Map.to_list
+        |> List.concat_map ~f:(fun (_, manglers) ->
+          (* We check whether an axis is all defaults, as we don't include those in the
+             name mangling scheme. *)
+          match (explicitness : Maybe_explicit.explicitness) with
+          | Drop_axis_if_all_defaults
+            when List.for_all manglers ~f:(fun (Value.Basic.P value) ->
+                   Value.is_default value) -> []
+          | Drop_axis_if_all_defaults | Explicit ->
+            List.map manglers ~f:(fun (P value) ->
+              let mangler = mangle_value value in
+              (* sets are surrounded with additional [''] to disambiguate from the non-set
+                 versions *)
+              match axis with
+              | Set _ -> Printf.sprintf "''%s''" mangler
+              | Singleton _ -> mangler))
     in
     { txt =
         extract (Set Kind)
@@ -144,7 +127,13 @@ let t =
     method string suffix name =
       if Suffix.is_empty suffix
       then name, Did_not_mangle
-      else concat_with_underscores (name :: suffix.txt), Mangled
+      else (
+        let name =
+          if String.ends_with ~suffix:"#" name
+          then concat_with_underscores (String.drop_suffix name 1 :: suffix.txt) ^ "#"
+          else concat_with_underscores (name :: suffix.txt)
+        in
+        name, Mangled)
 
     method! longident suffix =
       function

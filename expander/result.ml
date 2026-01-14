@@ -23,6 +23,11 @@ let all results =
     elt :: acc)
 ;;
 
+let all_unit results =
+  let+ (_ : unit list) = all results in
+  ()
+;;
+
 let collect_errors results =
   List.fold_right results ~init:(Ok []) ~f:(fun elt acc ->
     match elt, acc with
@@ -34,4 +39,16 @@ let collect_errors results =
   | Ok xs -> Ok xs
   | Error (err, []) -> Error err
   | Error (err, (_ :: _ as errs)) -> Error (Syntax_error.combine err errs)
+;;
+
+let to_either : _ -> _ Either.t = function
+  | Ok ok -> Left ok
+  | Error err -> Right err
+;;
+
+let combine_errors l =
+  let oks, errs = List.partition_map to_either l in
+  match errs with
+  | [] -> Ok oks
+  | _ :: _ -> Error errs
 ;;
