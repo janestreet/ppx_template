@@ -49,23 +49,12 @@ let f x = x__global
 let f x = x__value__global
 let f x = x__global
 let f__global x = x
+let f x = x__global
+let f__global x = x
+let f x = x__global
 
-include struct
-  let f x = x__global
-end [@@ocaml.doc " @inline "]
-
-include struct
-  let f__global x = x
-end [@@ocaml.doc " @inline "]
-
-include struct
-  let f x = x__global
-end [@@ocaml.doc " @inline "]
-
-include struct
-  let f__local x = x__local
-  and f x = x__global
-end [@@ocaml.doc " @inline "]
+let f__local x = x__local
+and f x = x__global
 
 [@@@end]
 
@@ -102,23 +91,15 @@ and f__local x = x
 let f__value__global x = x
 and f__value__local x = x
 
-include struct
-  let f__global x = x
-end [@@ocaml.doc " @inline "]
+let f__global x = x
 
-include struct
-  let f__local x = x
-  and f__global x = x
-end [@@ocaml.doc " @inline "]
+let f__local x = x
+and f__global x = x
 
-include struct
-  let f x = x
-end [@@ocaml.doc " @inline "]
+let f x = x
 
-include struct
-  let f__local x = x
-  and f x = x
-end [@@ocaml.doc " @inline "]
+let f__local x = x
+and f x = x
 
 [@@@end]
 
@@ -154,89 +135,20 @@ end [@@ocaml.doc " @inline "]
 
   let f x = x [@@mode l1 l2]]]
 
-include struct
-  let f__global x = x
-end [@@ocaml.doc " @inline "]
-
-include struct
-  let f__local x = x
-end [@@ocaml.doc " @inline "]
-
-include struct
-  include struct
-    include struct
-      let f__global__global x = x
-    end [@@ocaml.doc " @inline "]
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    include struct
-      let f__global__local x = x
-    end [@@ocaml.doc " @inline "]
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
-
-include struct
-  include struct
-    include struct
-      let f__local__global x = x
-    end [@@ocaml.doc " @inline "]
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    include struct
-      let f__local__local x = x
-    end [@@ocaml.doc " @inline "]
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
-
-include struct
-  include struct
-    let f__global__global x = x
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    let f__global__local x = x
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
-
-include struct
-  include struct
-    let f__local__global x = x
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    let f__local__local x = x
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
-
-include struct
-  include struct
-    include struct
-      let f x = x
-    end [@@ocaml.doc " @inline "]
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    include struct
-      let f__global__local x = x
-    end [@@ocaml.doc " @inline "]
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
-
-include struct
-  include struct
-    include struct
-      let f__local__global x = x
-    end [@@ocaml.doc " @inline "]
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    include struct
-      let f__local__local x = x
-    end [@@ocaml.doc " @inline "]
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
+let f__global x = x
+let f__local x = x
+let f__global__global x = x
+let f__global__local x = x
+let f__local__global x = x
+let f__local__local x = x
+let f__global__global x = x
+let f__global__local x = x
+let f__local__global x = x
+let f__local__local x = x
+let f x = x
+let f__global__local x = x
+let f__local__global x = x
+let f__local__local x = x
 
 [@@@end]
 
@@ -263,29 +175,18 @@ let f x = x__heap
   let g = (f [@mode.explicit c p])
   let h = (g [@mode.explicit p c])]]
 
-include struct
-  let f__portable__contended x = x
-  let g__portable__contended = f__portable__contended
-  let h__portable__contended = g__portable__contended
-end [@@ocaml.doc " @inline "]
-
-include struct
-  let f__nonportable__contended x = x
-  let g__nonportable__contended = f__nonportable__contended
-  let h__nonportable__contended = g__nonportable__contended
-end [@@ocaml.doc " @inline "]
-
-include struct
-  let f__portable__uncontended x = x
-  let g__portable__uncontended = f__portable__uncontended
-  let h__portable__uncontended = g__portable__uncontended
-end [@@ocaml.doc " @inline "]
-
-include struct
-  let f__nonportable__uncontended x = x
-  let g__nonportable__uncontended = f__nonportable__uncontended
-  let h__nonportable__uncontended = g__nonportable__uncontended
-end [@@ocaml.doc " @inline "]
+let f__portable__contended x = x
+let g__portable__contended = f__portable__contended
+let h__portable__contended = g__portable__contended
+let f__nonportable__contended x = x
+let g__nonportable__contended = f__nonportable__contended
+let h__nonportable__contended = g__nonportable__contended
+let f__portable__uncontended x = x
+let g__portable__uncontended = f__portable__uncontended
+let h__portable__uncontended = g__portable__uncontended
+let f__nonportable__uncontended x = x
+let g__nonportable__uncontended = f__nonportable__uncontended
+let h__nonportable__uncontended = g__nonportable__uncontended
 
 [@@@end]
 
@@ -308,6 +209,37 @@ end
 module _ = struct
   module type S__''value'' = sig end
   module type S__''bits64'' = sig end
+end
+
+[@@@end]
+
+[@@@expand_inline
+  module%template _ = struct
+    [@@@kind.default.explicit ka = (value, bits64)]
+
+    type 'a t1
+    type ('a, 'b) t2 [@@kind ka = ka, kb = (value, bits64)]
+
+    [@@@kind.default kb = (value, bits64)]
+
+    type ('a, 'b) t3
+  end]
+
+module _ = struct
+  type 'a t1__value
+
+  type ('a, 'b) t2
+  and ('a, 'b) t2__value__bits64
+
+  type ('a, 'b) t3__value__value
+  type ('a, 'b) t3__value__bits64
+  type 'a t1__bits64
+
+  type ('a, 'b) t2__bits64__value
+  and ('a, 'b) t2__bits64__bits64
+
+  type ('a, 'b) t3__bits64__value
+  type ('a, 'b) t3__bits64__bits64
 end
 
 [@@@end]

@@ -201,6 +201,7 @@ let%template y = (x [@kind k or value]) [@@kind k = (immediate, value)]
 [%%expect
   {|
 val x : int = 0
+
 val y__immediate : int = 0
 val y : int = 0
 |}]

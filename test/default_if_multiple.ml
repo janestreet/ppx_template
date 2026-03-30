@@ -10,20 +10,8 @@ open! Ppx_template_test_common
 
   let id (x : _) = x]]
 
-include struct
-  include struct
-    let id (x : _) = x
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
-
-include struct
-  include struct
-    let id (x : _) = x
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    let id__'value_value' (x : _) = x
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
+let id (x : _) = x
+let id (x : _) = x
+let id__'value_value' (x : _) = x
 
 [@@@end]

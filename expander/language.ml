@@ -549,28 +549,31 @@ module Typed = struct
          | Non_tuple Mode -> Mode { txt = Mode ident; loc }
          | Non_tuple Modality -> Modality { txt = Modality ident; loc }
          | Non_tuple Kind ->
-           Jkind_annotation { pjkind_desc = Pjk_abbreviation ident; pjkind_loc = loc }
+           Jkind_annotation
+             { pjka_desc = Pjk_abbreviation { loc; txt = Lident ident }; pjka_loc = loc }
          | Non_tuple Alloc -> Alloc
          | Non_tuple Synchro -> Synchro)
       | Kind_product kinds ->
+        let ghost_loc = { loc with loc_ghost = true } in
         let kinds =
           kinds
           |> Nonempty_list.to_list
           |> List.map ~f:(fun kind ->
-            let (Jkind_annotation kind) = to_node ~loc kind in
+            let (Jkind_annotation kind) = to_node ~loc:ghost_loc kind in
             kind)
         in
-        Jkind_annotation { pjkind_desc = Pjk_product kinds; pjkind_loc = loc }
+        Jkind_annotation { pjka_desc = Pjk_product kinds; pjka_loc = loc }
       | Kind_mod (kind, mods) ->
-        let (Jkind_annotation kind) = to_node ~loc kind in
+        let ghost_loc = { loc with loc_ghost = true } in
+        let (Jkind_annotation kind) = to_node ~loc:ghost_loc kind in
         let mods =
           mods
           |> Nonempty_list.to_list
           |> List.sort_uniq ~cmp:compare
           |> List.map ~f:(fun (Identifier { ident; type_ = Non_tuple Modality }) ->
-            { txt = Mode ident; loc })
+            { txt = Mode ident; loc = ghost_loc })
         in
-        Jkind_annotation { pjkind_desc = Pjk_mod (kind, mods); pjkind_loc = loc }
+        Jkind_annotation { pjka_desc = Pjk_mod (kind, mods); pjka_loc = loc }
     ;;
   end
 

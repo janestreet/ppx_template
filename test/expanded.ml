@@ -32,85 +32,49 @@ let x = {| multiple [@@@mode] floating attributes |}
 module _ : sig
   val x : string
 
-  include sig
-    [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-    val x__a : string
+  val x__a : string
 
-    [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-    include sig
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      val x__a__c : string
+  val x__a__c : string
 
-      [@@@ocaml.text "/*"]
-    end
-    [@@ocaml.doc " @inline "]
+  [@@@ocaml.text "/*"]
 
-    include sig
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      val x__a__d : string
+  val x__a__d : string
 
-      [@@@ocaml.text "/*"]
-    end
-    [@@ocaml.doc " @inline "]
-  end
-  [@@ocaml.doc " @inline "]
+  [@@@ocaml.text "/*"]
 
-  include sig
-    [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-    val x__b : string
+  val x__b : string
 
-    [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-    include sig
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      val x__b__c : string
+  val x__b__c : string
 
-      [@@@ocaml.text "/*"]
-    end
-    [@@ocaml.doc " @inline "]
+  [@@@ocaml.text "/*"]
 
-    include sig
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      val x__b__d : string
+  val x__b__d : string
 
-      [@@@ocaml.text "/*"]
-    end
-    [@@ocaml.doc " @inline "]
-  end
-  [@@ocaml.doc " @inline "]
+  [@@@ocaml.text "/*"]
 end = struct
   let x = "not duplicated"
-
-  include struct
-    let x__a = "duplicated twice"
-
-    include struct
-      let x__a__c = "duplicated four times"
-    end [@@ocaml.doc " @inline "]
-
-    include struct
-      let x__a__d = "duplicated four times"
-    end [@@ocaml.doc " @inline "]
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    let x__b = "duplicated twice"
-
-    include struct
-      let x__b__c = "duplicated four times"
-    end [@@ocaml.doc " @inline "]
-
-    include struct
-      let x__b__d = "duplicated four times"
-    end [@@ocaml.doc " @inline "]
-  end [@@ocaml.doc " @inline "]
+  let x__a = "duplicated twice"
+  let x__a__c = "duplicated four times"
+  let x__a__d = "duplicated four times"
+  let x__b = "duplicated twice"
+  let x__b__c = "duplicated four times"
+  let x__b__d = "duplicated four times"
 end
 
 [@@@end]
@@ -168,39 +132,29 @@ module _ = struct
   end
 
   module _ : sig
-    include sig
-      open T
+    open T
 
-      [@@@ocaml.text "/*"]
+    [@@@ocaml.text "/*"]
 
-      val x__a : string
+    val x__a : string
 
-      [@@@ocaml.text "/*"]
-    end
-    [@@ocaml.doc " @inline "]
+    [@@@ocaml.text "/*"]
 
-    include sig
-      open T
+    open T
 
-      [@@@ocaml.text "/*"]
+    [@@@ocaml.text "/*"]
 
-      val x__b : string
+    val x__b : string
 
-      [@@@ocaml.text "/*"]
-    end
-    [@@ocaml.doc " @inline "]
+    [@@@ocaml.text "/*"]
   end = struct
-    include struct
-      open T__a
+    open T__a
 
-      let x__a = x
-    end [@@ocaml.doc " @inline "]
+    let x__a = x
 
-    include struct
-      open T__b
+    open T__b
 
-      let x__b = x
-    end [@@ocaml.doc " @inline "]
+    let x__b = x
   end
 end
 
@@ -278,17 +232,17 @@ end
   let x = {| @@deriving attributes are not duplicated |}
 
   module%template _ : sig
-    type foo [@@kind k = (value, immediate)] [@@deriving compare]
+    type foo [@@kind k = (value, immediate)] [@@deriving compare ~localize]
     and bar [@@kind k = (value, immediate)] [@@deriving sexp_of]
   end = struct
     type foo = bool [@@kind k = (value, immediate)] [@@deriving sexp_of]
-    and bar = int [@@kind k = (value, immediate)] [@@deriving compare]
+    and bar = int [@@kind k = (value, immediate)] [@@deriving compare ~localize]
   end]
 
 let x = {| @@deriving attributes are not duplicated |}
 
 module _ : sig
-  type foo [@@deriving compare]
+  type foo [@@deriving compare ~localize]
   and foo__immediate [@@immediate]
   and bar [@@deriving sexp_of]
   and bar__immediate [@@immediate]
@@ -297,9 +251,23 @@ module _ : sig
     [@@@ocaml.warning "-32"]
 
     val compare_foo : foo -> (foo[@merlin.hide]) -> int
+    val compare_foo__local : foo -> (foo[@merlin.hide]) -> int
     val compare_foo__immediate : foo__immediate -> (foo__immediate[@merlin.hide]) -> int
+
+    val compare_foo__immediate__local
+      :  foo__immediate
+      -> (foo__immediate[@merlin.hide])
+      -> int
+
     val compare_bar : bar -> (bar[@merlin.hide]) -> int
+    val compare_bar__local : bar -> (bar[@merlin.hide]) -> int
     val compare_bar__immediate : bar__immediate -> (bar__immediate[@merlin.hide]) -> int
+
+    val compare_bar__immediate__local
+      :  bar__immediate
+      -> (bar__immediate[@merlin.hide])
+      -> int
+
     val sexp_of_foo : foo -> Sexplib0.Sexp.t
     val sexp_of_foo__immediate : foo__immediate -> Sexplib0.Sexp.t
     val sexp_of_bar : bar -> Sexplib0.Sexp.t
@@ -309,7 +277,7 @@ module _ : sig
 end = struct
   type foo = bool [@@deriving sexp_of]
   and foo__immediate = bool [@@immediate]
-  and bar = int [@@deriving compare]
+  and bar = int [@@deriving compare ~localize]
   and bar__immediate = int [@@immediate]
 
   include struct
@@ -328,15 +296,35 @@ end = struct
     and _ = sexp_of_bar
     and _ = sexp_of_bar__immediate
 
-    let compare_foo = (compare_bool : foo -> (foo[@merlin.hide]) -> int)
+    let compare_foo__local = (compare_bool__local : foo -> (foo[@merlin.hide]) -> int)
+
+    and compare_foo__immediate__local =
+      (compare_bool__local : foo__immediate -> (foo__immediate[@merlin.hide]) -> int)
+
+    and compare_bar__local = (compare_int__local : bar -> (bar[@merlin.hide]) -> int)
+
+    and compare_bar__immediate__local =
+      (compare_int__local : bar__immediate -> (bar__immediate[@merlin.hide]) -> int)
+    ;;
+
+    let _ = compare_foo__local
+    and _ = compare_foo__immediate__local
+    and _ = compare_bar__local
+    and _ = compare_bar__immediate__local
+
+    let compare_foo =
+      (fun a b -> compare_foo__local a b : foo -> (foo[@merlin.hide]) -> int)
 
     and compare_foo__immediate =
-      (compare_bool : foo__immediate -> (foo__immediate[@merlin.hide]) -> int)
+      (fun a b -> compare_foo__immediate__local a b
+       : foo__immediate -> (foo__immediate[@merlin.hide]) -> int)
 
-    and compare_bar = (compare_int : bar -> (bar[@merlin.hide]) -> int)
+    and compare_bar =
+      (fun a b -> compare_bar__local a b : bar -> (bar[@merlin.hide]) -> int)
 
     and compare_bar__immediate =
-      (compare_int : bar__immediate -> (bar__immediate[@merlin.hide]) -> int)
+      (fun a b -> compare_bar__immediate__local a b
+       : bar__immediate -> (bar__immediate[@merlin.hide]) -> int)
     ;;
 
     let _ = compare_foo
@@ -491,52 +479,13 @@ let x = {|doc comment hiding for module includes|}
 
 module type S = sig
   module N : sig
-    include sig
-      module type O = sig
-        type t
-      end
-    end
-    [@@ocaml.doc " @inline "]
-
-    include sig
-      [@@@ocaml.text "/*"]
-
-      module type O__bits64 = sig
-        type t
-      end
-
-      [@@@ocaml.text "/*"]
-    end
-    [@@ocaml.doc " @inline "]
-
-    include sig
-      [@@@ocaml.text "/*"]
-
-      module type O__float64 = sig
-        type t
-      end
-
-      [@@@ocaml.text "/*"]
-    end
-    [@@ocaml.doc " @inline "]
-  end
-
-  include sig
-    module type M = sig
+    module type O = sig
       type t
     end
 
-    include M
-    include N.O
-    include M with type t := int
-    include N.O with type t := int
-  end
-  [@@ocaml.doc " @inline "]
-
-  include sig
     [@@@ocaml.text "/*"]
 
-    module type M__bits64 = sig
+    module type O__bits64 = sig
       type t
     end
 
@@ -544,64 +493,85 @@ module type S = sig
 
     [@@@ocaml.text "/*"]
 
-    include M__bits64
-
-    [@@@ocaml.text "/*"]
-
-    [@@@ocaml.text "/*"]
-
-    include N.O__bits64
-
-    [@@@ocaml.text "/*"]
-
-    [@@@ocaml.text "/*"]
-
-    include M__bits64 with type t := int
-
-    [@@@ocaml.text "/*"]
-
-    [@@@ocaml.text "/*"]
-
-    include N.O__bits64 with type t := int
-
-    [@@@ocaml.text "/*"]
-  end
-  [@@ocaml.doc " @inline "]
-
-  include sig
-    [@@@ocaml.text "/*"]
-
-    module type M__float64 = sig
+    module type O__float64 = sig
       type t
     end
 
     [@@@ocaml.text "/*"]
-
-    [@@@ocaml.text "/*"]
-
-    include M__float64
-
-    [@@@ocaml.text "/*"]
-
-    [@@@ocaml.text "/*"]
-
-    include N.O__float64
-
-    [@@@ocaml.text "/*"]
-
-    [@@@ocaml.text "/*"]
-
-    include M__float64 with type t := int
-
-    [@@@ocaml.text "/*"]
-
-    [@@@ocaml.text "/*"]
-
-    include N.O__float64 with type t := int
-
-    [@@@ocaml.text "/*"]
   end
-  [@@ocaml.doc " @inline "]
+
+  module type M = sig
+    type t
+  end
+
+  include M
+  include N.O
+  include M with type t := int
+  include N.O with type t := int
+
+  [@@@ocaml.text "/*"]
+
+  module type M__bits64 = sig
+    type t
+  end
+
+  [@@@ocaml.text "/*"]
+
+  [@@@ocaml.text "/*"]
+
+  include M__bits64
+
+  [@@@ocaml.text "/*"]
+
+  [@@@ocaml.text "/*"]
+
+  include N.O__bits64
+
+  [@@@ocaml.text "/*"]
+
+  [@@@ocaml.text "/*"]
+
+  include M__bits64 with type t := int
+
+  [@@@ocaml.text "/*"]
+
+  [@@@ocaml.text "/*"]
+
+  include N.O__bits64 with type t := int
+
+  [@@@ocaml.text "/*"]
+
+  [@@@ocaml.text "/*"]
+
+  module type M__float64 = sig
+    type t
+  end
+
+  [@@@ocaml.text "/*"]
+
+  [@@@ocaml.text "/*"]
+
+  include M__float64
+
+  [@@@ocaml.text "/*"]
+
+  [@@@ocaml.text "/*"]
+
+  include N.O__float64
+
+  [@@@ocaml.text "/*"]
+
+  [@@@ocaml.text "/*"]
+
+  include M__float64 with type t := int
+
+  [@@@ocaml.text "/*"]
+
+  [@@@ocaml.text "/*"]
+
+  include N.O__float64 with type t := int
+
+  [@@@ocaml.text "/*"]
 end
 
 [@@@end]

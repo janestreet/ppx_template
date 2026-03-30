@@ -7,6 +7,7 @@ type explicitness =
 
 type 'a t = explicitness * 'a
 
+val most_explicit : explicitness -> explicitness -> explicitness
 val map : 'a t -> f:('a -> 'b) -> 'b t
 val map_result : 'a t -> f:('a -> ('b, 'c) result) -> ('b t, 'c) result
 val ok : ('a, 'b) result t -> ('a t, 'b) result

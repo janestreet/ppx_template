@@ -59,86 +59,47 @@ end
 
 [@@@end]
 
-[@@@expand_inline
-  [%%template
-  [@@@mode p = (nonportable, portable)]
+module _ = struct
+  [@@@expand_inline
+    [%%template
+    [@@@mode p = (nonportable, portable)]
 
-  type u = { field : unit -> unit } [@@mode p]
+    type u = { field : unit -> unit } [@@mode p]
 
-  [@@@kind.default k = (value mod p, bits64 mod p)]
+    [@@@kind.default k = (value mod p, bits64 mod p)]
 
-  type t]]
+    type t]]
 
-include struct
   type u = { field : unit -> unit }
-
-  include struct
-    type t__'value_mod_nonportable'
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    type t__'bits64_mod_nonportable'
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
-
-include struct
+  type t__'value_mod_nonportable'
+  type t__'bits64_mod_nonportable'
   type u__portable = { field : unit -> unit }
+  type t__'value_mod_portable'
+  type t__'bits64_mod_portable'
 
-  include struct
-    type t__'value_mod_portable'
-  end [@@ocaml.doc " @inline "]
+  [@@@end]
+end
 
-  include struct
-    type t__'bits64_mod_portable'
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
+module _ = struct
+  [@@@expand_inline
+    [%%template
+    [@@@modality s = (stateful, observing, stateless)]
 
-[@@@end]
+    type u = { field : unit -> unit } [@@modality s]
 
-[@@@expand_inline
-  [%%template
-  [@@@modality s = (stateful, observing, stateless)]
+    [@@@kind.default k = (value mod s, bits64 mod s)]
 
-  type u = { field : unit -> unit } [@@modality s]
+    type t]]
 
-  [@@@kind.default k = (value mod s, bits64 mod s)]
-
-  type t]]
-
-include struct
   type u = { field : unit -> unit }
-
-  include struct
-    type t__'value_mod_stateful'
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    type t__'bits64_mod_stateful'
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
-
-include struct
+  type t__'value_mod_stateful'
+  type t__'bits64_mod_stateful'
   type u__observing = { field : unit -> unit }
-
-  include struct
-    type t__'value_mod_observing'
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    type t__'bits64_mod_observing'
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
-
-include struct
+  type t__'value_mod_observing'
+  type t__'bits64_mod_observing'
   type u__stateless = { field : unit -> unit }
+  type t__'value_mod_stateless'
+  type t__'bits64_mod_stateless'
 
-  include struct
-    type t__'value_mod_stateless'
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    type t__'bits64_mod_stateless'
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
-
-[@@@end]
+  [@@@end]
+end

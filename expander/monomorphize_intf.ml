@@ -13,10 +13,10 @@ module Definitions = struct
     method module_type : 'ctx -> module_type -> module_type
     method pattern : 'ctx -> pattern -> pattern
     method signature : 'ctx -> signature -> signature
-    method signature_item : 'ctx -> signature_item -> signature_item
+    method signature_item_inline : 'ctx -> signature_item -> signature_item list
     method signature_items : 'ctx -> signature_item list -> signature_item list
     method structure : 'ctx -> structure -> structure
-    method structure_item : 'ctx -> structure_item -> structure_item
+    method structure_item_inline : 'ctx -> structure_item -> structure_item list
   end
 end
 
@@ -33,13 +33,5 @@ module type Monomorphize = sig
 
   (** Perform the main [ppx_template] expansion over the ast. See [t_inline] below for
       explanation of [no_inline] suffix. *)
-  val t_no_inline : Context.t t
-
-  (** Inserts [[%%template.inline]] nodes in order to reduce the number of necessary
-      [include struct] and [include sig] items created. This is mostly useful for when the
-      templated code is inserted into the source code in order to reduce clutter.
-
-      NOTE: Producing code via [t_inline] requires depending on [ppx_template] itself.
-      Most external cases will want to use [t_no_inline] to avoid dependency issues. *)
-  val t_inline : Context.t t
+  val t : Context.t t
 end
