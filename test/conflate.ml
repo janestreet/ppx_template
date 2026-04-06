@@ -64,86 +64,47 @@ end
 
 [@@@end]
 
-[@@@expand_inline
-  [%%template
-  [@@@mode p = (nonportable, portable)]
+module _ = struct
+  [@@@expand_inline
+    [%%template
+    [@@@mode p = (nonportable, portable)]
 
-  type u = { field : unit -> unit @@ p } [@@mode p]
+    type u = { field : unit -> unit @@ p } [@@mode p]
 
-  [@@@kind.default k = (value mod p, bits64 mod p)]
+    [@@@kind.default k = (value mod p, bits64 mod p)]
 
-  type t : k]]
+    type t : k]]
 
-include struct
   type u = { field : unit -> unit @@ nonportable }
-
-  include struct
-    type t__'value_mod_nonportable' : value mod nonportable
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    type t__'bits64_mod_nonportable' : bits64 mod nonportable
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
-
-include struct
+  type t__'value_mod_nonportable' : value mod nonportable
+  type t__'bits64_mod_nonportable' : bits64 mod nonportable
   type u__portable = { field : unit -> unit @@ portable }
+  type t__'value_mod_portable' : value mod portable
+  type t__'bits64_mod_portable' : bits64 mod portable
 
-  include struct
-    type t__'value_mod_portable' : value mod portable
-  end [@@ocaml.doc " @inline "]
+  [@@@end]
+end
 
-  include struct
-    type t__'bits64_mod_portable' : bits64 mod portable
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
+module _ = struct
+  [@@@expand_inline
+    [%%template
+    [@@@modality s = (stateful, observing, stateless)]
 
-[@@@end]
+    type u = { field : unit @ s -> unit @ s } [@@modality s]
 
-[@@@expand_inline
-  [%%template
-  [@@@modality s = (stateful, observing, stateless)]
+    [@@@kind.default k = (value mod s, bits64 mod s)]
 
-  type u = { field : unit @ s -> unit @ s } [@@modality s]
+    type t : k]]
 
-  [@@@kind.default k = (value mod s, bits64 mod s)]
-
-  type t : k]]
-
-include struct
   type u = { field : unit @ stateful -> unit @ stateful }
-
-  include struct
-    type t__'value_mod_stateful' : value mod stateful
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    type t__'bits64_mod_stateful' : bits64 mod stateful
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
-
-include struct
+  type t__'value_mod_stateful' : value mod stateful
+  type t__'bits64_mod_stateful' : bits64 mod stateful
   type u__observing = { field : unit @ observing -> unit @ observing }
-
-  include struct
-    type t__'value_mod_observing' : value mod observing
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    type t__'bits64_mod_observing' : bits64 mod observing
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
-
-include struct
+  type t__'value_mod_observing' : value mod observing
+  type t__'bits64_mod_observing' : bits64 mod observing
   type u__stateless = { field : unit @ stateless -> unit @ stateless }
+  type t__'value_mod_stateless' : value mod stateless
+  type t__'bits64_mod_stateless' : bits64 mod stateless
 
-  include struct
-    type t__'value_mod_stateless' : value mod stateless
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    type t__'bits64_mod_stateless' : bits64 mod stateless
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
-
-[@@@end]
+  [@@@end]
+end

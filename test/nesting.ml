@@ -13,41 +13,35 @@ module _ : sig
 
     module%template.portable M () : sig end]]
 
-  include sig
-    [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-    val x__m1a : unit
+  val x__m1a : unit
 
-    [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-    val y : unit
+  val y : unit
 
-    [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-    module M__m1a__portable : functor () -> sig @@ portable end
-    module M__m1a : functor () -> sig @@ nonportable end
+  module M__m1a__portable : functor () -> sig @@ portable end
+  module M__m1a : functor () -> sig @@ nonportable end
 
-    [@@@ocaml.text "/*"]
-  end
-  [@@ocaml.doc " @inline "]
+  [@@@ocaml.text "/*"]
 
-  include sig
-    [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-    val x__m1b : unit
+  val x__m1b : unit
 
-    [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-    val y : unit
+  val y : unit
 
-    [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-    module M__m1b__portable : functor () -> sig @@ portable end
-    module M__m1b : functor () -> sig @@ nonportable end
+  module M__m1b__portable : functor () -> sig @@ portable end
+  module M__m1b : functor () -> sig @@ nonportable end
 
-    [@@@ocaml.text "/*"]
-  end
-  [@@ocaml.doc " @inline "]
+  [@@@ocaml.text "/*"]
 
   [@@@end]
 end = struct
@@ -60,21 +54,17 @@ end = struct
 
     module%template.portable M () = struct end]]
 
-  include struct
-    let x__m1a = ()
-    let y = () [@@warning "-32"]
+  let x__m1a = ()
+  let y = () [@@warning "-32"]
 
-    module M__m1a__portable () = struct end
-    module M__m1a () = struct end
-  end [@@ocaml.doc " @inline "]
+  module M__m1a__portable () = struct end
+  module M__m1a () = struct end
 
-  include struct
-    let x__m1b = ()
-    let y = () [@@warning "-32"]
+  let x__m1b = ()
+  let y = () [@@warning "-32"]
 
-    module M__m1b__portable () = struct end
-    module M__m1b () = struct end
-  end [@@ocaml.doc " @inline "]
+  module M__m1b__portable () = struct end
+  module M__m1b () = struct end
 
   [@@@end]
 end

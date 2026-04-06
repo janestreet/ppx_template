@@ -6,7 +6,7 @@ let%template id (type a : x) (x : a) : a = x
 [%%expect
   {|
 Line _, characters _-_:
-Error: Unknown layout x
+Error: Unbound kind x
 |}]
 
 (* Normal compiler error for unknown layout bound by [ppx_template]. *)
@@ -15,7 +15,7 @@ let%template id (type a : foo) (x : a) : a = x [@@kind foo = bar]
 [%%expect
   {|
 Line _, characters _-_:
-Error: Unknown layout bar
+Error: Unbound kind bar
 |}]
 
 (* Normal compiler error for unknown mode bound by [ppx_template]. *)
@@ -503,7 +503,8 @@ let%template _ : _ = () [@kind Foo]
 [%%expect
   {|
 Line _, characters _-_:
-Error: [ppx_template] syntax error: no constructors in template expressions expected
+Error: [ppx_template] syntax error: no constructors in template expressions
+       expected
 |}]
 
 (* When [ppx_template] produces error nodes, be sure to mark any attributes in the dropped
@@ -914,7 +915,7 @@ end
 [%%expect
   {|
 Line _, characters _-_:
-Error: Unknown layout m
+Error: Unbound kind m
 |}]
 
 module type%template _T = sig
@@ -1692,7 +1693,8 @@ Error: [ppx_template] syntax error: (_ : (_ : <kind>)) expected
 [%%expect
   {|
 Line _, characters _-_:
-Error: [ppx_template] syntax error: kind abbreviation, mod, or product expected
+Error: [ppx_template] syntax error: kind abbreviation, mod, or product
+       expected
 |}]
 
 (* [with]-kinds are unsupported. *)
@@ -1702,7 +1704,8 @@ Error: [ppx_template] syntax error: kind abbreviation, mod, or product expected
 [%%expect
   {|
 Line _, characters _-_:
-Error: [ppx_template] syntax error: kind abbreviation, mod, or product expected
+Error: [ppx_template] syntax error: kind abbreviation, mod, or product
+       expected
 |}]
 
 (* [kind_of_] is unsupported. *)
@@ -1712,7 +1715,8 @@ Error: [ppx_template] syntax error: kind abbreviation, mod, or product expected
 [%%expect
   {|
 Line _, characters _-_:
-Error: [ppx_template] syntax error: kind abbreviation, mod, or product expected
+Error: [ppx_template] syntax error: kind abbreviation, mod, or product
+       expected
 |}]
 
 (* Kind abbreviations are type checked. *)
@@ -1767,4 +1771,38 @@ Error: Kind is a subkind of two incomparable coercion options:
          is subkind of (Mod value_or_null (separable))
          and           (Mod value_or_null (external64))
          But neither is a subkind of the other
+|}]
+
+(* Regression: handling of nested attributes in error case. This used to unhelpfully
+   report an error that the [[@kind]] attribute was unused. *)
+
+[%%template
+  module type S = sig
+    include S0 [@alloc bad_identifier] [@with: type (_ : k) elt := (elt[@kind value])]
+  end]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound template identifier [bad_identifier] of type [Alloc].
+|}]
+
+(* Even if both attributes both fail to parse, we ignore the errors and produce
+   [error_you_can_only_use_one_attribute_per_axis] instead. *)
+
+let%template[@mode.explicit _] f () = ()
+let%template[@mode _] f () = ()
+let%template[@mode.explicit _] [@mode _] f () = ()
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: apply expected
+
+Line _, characters _-_:
+Error: apply expected
+
+Line _, characters _-_:
+Error: You cannot have two attributes for the same axis.
+       E.g. you cannot have [let f = ... [@mode.explicit x] [@mode y]].
 |}]

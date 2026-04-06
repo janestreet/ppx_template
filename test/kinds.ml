@@ -36,24 +36,9 @@ let id = M.id
 and id__'value_bits64' = M.id__'value_bits64'
 and id__'value_mod_contended' = M.id__'value_mod_contended'
 
-include struct
-  include struct
-    let const2 _ _ x = x
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    let const2__value__'value_mod_contended' _ _ x = x
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
-
-include struct
-  include struct
-    let const2__'value_bits64'__value _ _ x = x
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    let const2__'value_bits64'__'value_mod_contended' _ _ x = x
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
+let const2 _ _ x = x
+let const2__value__'value_mod_contended' _ _ x = x
+let const2__'value_bits64'__value _ _ x = x
+let const2__'value_bits64'__'value_mod_contended' _ _ x = x
 
 [@@@end]

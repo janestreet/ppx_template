@@ -100,9 +100,6 @@ let convert mty with_ =
             } -> inline sig_ attrs modalities
           | { pincl_loc; _ } ->
             error ~loc:pincl_loc "[include] only allowed for [sig ... end]")
-       | Psig_extension (({ txt = "template.inline"; loc = _ }, PSig sig_), attrs) ->
-         (match Ppxlib_jane.Shim.Signature.of_parsetree sig_ with
-          | { psg_modalities = modalities; _ } -> inline sig_ attrs modalities)
        | Psig_attribute attr ->
          let* mty = check_attributes_and_modalities mty [ attr ] [] in
          loop mty path with_

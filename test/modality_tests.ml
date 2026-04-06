@@ -167,25 +167,10 @@ let%template _nonportable =
   end]
 
 module _ = struct
-  include struct
-    include struct
-      type _t__'value_mod_nonportable' : value mod nonportable
-    end [@@ocaml.doc " @inline "]
-
-    include struct
-      type _t__'bits64_mod_nonportable' : bits64 mod nonportable
-    end [@@ocaml.doc " @inline "]
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    include struct
-      type _t__'value_mod_portable'__portable : value mod portable
-    end [@@ocaml.doc " @inline "]
-
-    include struct
-      type _t__'bits64_mod_portable'__portable : bits64 mod portable
-    end [@@ocaml.doc " @inline "]
-  end [@@ocaml.doc " @inline "]
+  type _t__'value_mod_nonportable' : value mod nonportable
+  type _t__'bits64_mod_nonportable' : bits64 mod nonportable
+  type _t__'value_mod_portable'__portable : value mod portable
+  type _t__'bits64_mod_portable'__portable : bits64 mod portable
 end
 
 [@@@end]

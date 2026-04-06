@@ -61,190 +61,133 @@ open! Ppx_template_test_common
 module List : sig
   type 'a t = 'a list
 
-  include sig
-    include sig
-      val cons : 'a @ global -> 'a t @ global -> 'a t @ global
-    end
-    [@@ocaml.doc " @inline "]
-  end
-  [@@ocaml.doc " @inline "]
+  val cons : 'a @ global -> 'a t @ global -> 'a t @ global
 
-  include sig
-    include sig
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      val cons__stack : 'a @ global -> 'a t @ global -> local_ 'a t [@@zero_alloc]
+  val cons__stack : 'a @ global -> 'a t @ global -> local_ 'a t [@@zero_alloc]
 
-      [@@@ocaml.text "/*"]
-    end
-    [@@ocaml.doc " @inline "]
+  [@@@ocaml.text "/*"]
 
-    include sig
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      val cons__local__stack : local_ 'a -> local_ 'a t -> local_ 'a t [@@zero_alloc]
+  val cons__local__stack : local_ 'a -> local_ 'a t -> local_ 'a t [@@zero_alloc]
 
-      [@@@ocaml.text "/*"]
-    end
-    [@@ocaml.doc " @inline "]
-  end
-  [@@ocaml.doc " @inline "]
+  [@@@ocaml.text "/*"]
 
-  include sig
-    include sig
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      val map__local : local_ 'a t -> f:(local_ 'a -> 'a @ global) -> 'a t @ global
+  val map__local : local_ 'a t -> f:(local_ 'a -> 'a @ global) -> 'a t @ global
 
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      val fold__local
-        :  local_ 'a t
-        -> init:'acc @ global
-        -> f:('acc @ global -> local_ 'a -> 'acc @ global)
-        -> 'acc @ global
+  val fold__local
+    :  local_ 'a t
+    -> init:'acc @ global
+    -> f:('acc @ global -> local_ 'a -> 'acc @ global)
+    -> 'acc @ global
 
-      [@@@ocaml.text "/*"]
-    end
-    [@@ocaml.doc " @inline "]
+  [@@@ocaml.text "/*"]
 
-    include sig
-      val map : 'a t @ global -> f:('a @ global -> 'a @ global) -> 'a t @ global
+  val map : 'a t @ global -> f:('a @ global -> 'a @ global) -> 'a t @ global
 
-      val fold
-        :  'a t @ global
-        -> init:'acc @ global
-        -> f:('acc @ global -> 'a @ global -> 'acc @ global)
-        -> 'acc @ global
-    end
-    [@@ocaml.doc " @inline "]
-  end
-  [@@ocaml.doc " @inline "]
+  val fold
+    :  'a t @ global
+    -> init:'acc @ global
+    -> f:('acc @ global -> 'a @ global -> 'acc @ global)
+    -> 'acc @ global
 
-  include sig
-    include sig
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      val map__local__stack : local_ 'a t -> f:(local_ 'a -> local_ 'a) -> local_ 'a t
-      [@@zero_alloc]
+  val map__local__stack : local_ 'a t -> f:(local_ 'a -> local_ 'a) -> local_ 'a t
+  [@@zero_alloc]
 
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      val fold__local__stack
-        :  local_ 'a t
-        -> init:local_ 'acc
-        -> f:(local_ 'acc -> local_ 'a -> local_ 'acc)
-        -> local_ 'acc
-      [@@zero_alloc]
+  val fold__local__stack
+    :  local_ 'a t
+    -> init:local_ 'acc
+    -> f:(local_ 'acc -> local_ 'a -> local_ 'acc)
+    -> local_ 'acc
+  [@@zero_alloc]
 
-      [@@@ocaml.text "/*"]
-    end
-    [@@ocaml.doc " @inline "]
+  [@@@ocaml.text "/*"]
 
-    include sig
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      val map__stack : 'a t @ global -> f:('a @ global -> local_ 'a) -> local_ 'a t
-      [@@zero_alloc]
+  val map__stack : 'a t @ global -> f:('a @ global -> local_ 'a) -> local_ 'a t
+  [@@zero_alloc]
 
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      val fold__stack
-        :  'a t @ global
-        -> init:local_ 'acc
-        -> f:(local_ 'acc -> 'a @ global -> local_ 'acc)
-        -> local_ 'acc
-      [@@zero_alloc]
+  val fold__stack
+    :  'a t @ global
+    -> init:local_ 'acc
+    -> f:(local_ 'acc -> 'a @ global -> local_ 'acc)
+    -> local_ 'acc
+  [@@zero_alloc]
 
-      [@@@ocaml.text "/*"]
-    end
-    [@@ocaml.doc " @inline "]
-  end
-  [@@ocaml.doc " @inline "]
+  [@@@ocaml.text "/*"]
 end = struct
   type 'a t = 'a list
 
-  include struct
-    include struct
-      let cons (hd @ global) (tl @ global) = hd :: tl
-    end [@@ocaml.doc " @inline "]
-  end [@@ocaml.doc " @inline "]
+  let cons (hd @ global) (tl @ global) = hd :: tl
+  let cons__stack (hd @ global) (tl @ global) = exclave_ hd :: tl
+  let cons__local__stack (local_ hd) (local_ tl) = exclave_ hd :: tl
 
-  include struct
-    include struct
-      let cons__stack (hd @ global) (tl @ global) = exclave_ hd :: tl
-    end [@@ocaml.doc " @inline "]
+  let rec map__local (local_ t) ~f =
+    match t with
+    | [] -> []
+    | hd :: tl -> f hd :: map__local tl ~f
+  ;;
 
-    include struct
-      let cons__local__stack (local_ hd) (local_ tl) = exclave_ hd :: tl
-    end [@@ocaml.doc " @inline "]
-  end [@@ocaml.doc " @inline "]
+  let rec fold__local (local_ t) ~(init @ global) ~f =
+    match t with
+    | [] -> init
+    | hd :: tl -> fold__local tl ~init:(f init hd) ~f
+  ;;
 
-  include struct
-    include struct
-      let rec map__local (local_ t) ~f =
-        match t with
-        | [] -> []
-        | hd :: tl -> f hd :: map__local tl ~f
-      ;;
+  let rec map (t @ global) ~f =
+    match t with
+    | [] -> []
+    | hd :: tl -> f hd :: map tl ~f
+  ;;
 
-      let rec fold__local (local_ t) ~(init @ global) ~f =
-        match t with
-        | [] -> init
-        | hd :: tl -> fold__local tl ~init:(f init hd) ~f
-      ;;
-    end [@@ocaml.doc " @inline "]
+  let rec fold (t @ global) ~(init @ global) ~f =
+    match t with
+    | [] -> init
+    | hd :: tl -> fold tl ~init:(f init hd) ~f
+  ;;
 
-    include struct
-      let rec map (t @ global) ~f =
-        match t with
-        | [] -> []
-        | hd :: tl -> f hd :: map tl ~f
-      ;;
+  let rec map__local__stack (local_ t) ~f = exclave_
+    match t with
+    | [] -> []
+    | hd :: tl -> (f [@zero_alloc assume]) hd :: map__local__stack tl ~f
+  ;;
 
-      let rec fold (t @ global) ~(init @ global) ~f =
-        match t with
-        | [] -> init
-        | hd :: tl -> fold tl ~init:(f init hd) ~f
-      ;;
-    end [@@ocaml.doc " @inline "]
-  end [@@ocaml.doc " @inline "]
+  let rec fold__local__stack (local_ t) ~(local_ init) ~f = exclave_
+    match t with
+    | [] -> init
+    | hd :: tl -> fold__local__stack tl ~init:((f [@zero_alloc assume]) init hd) ~f
+  ;;
 
-  include struct
-    include struct
-      let rec map__local__stack (local_ t) ~f = exclave_
-        match t with
-        | [] -> []
-        | hd :: tl -> (f [@zero_alloc assume]) hd :: map__local__stack tl ~f
-      ;;
+  let rec map__stack (t @ global) ~f = exclave_
+    match t with
+    | [] -> []
+    | hd :: tl -> (f [@zero_alloc assume]) hd :: map__stack tl ~f
+  ;;
 
-      let rec fold__local__stack (local_ t) ~(local_ init) ~f = exclave_
-        match t with
-        | [] -> init
-        | hd :: tl -> fold__local__stack tl ~init:((f [@zero_alloc assume]) init hd) ~f
-      ;;
-    end [@@ocaml.doc " @inline "]
-
-    include struct
-      let rec map__stack (t @ global) ~f = exclave_
-        match t with
-        | [] -> []
-        | hd :: tl -> (f [@zero_alloc assume]) hd :: map__stack tl ~f
-      ;;
-
-      let rec fold__stack (t @ global) ~(local_ init) ~f = exclave_
-        match t with
-        | [] -> init
-        | hd :: tl -> fold__stack tl ~init:((f [@zero_alloc assume]) init hd) ~f
-      ;;
-    end [@@ocaml.doc " @inline "]
-  end [@@ocaml.doc " @inline "]
+  let rec fold__stack (t @ global) ~(local_ init) ~f = exclave_
+    match t with
+    | [] -> init
+    | hd :: tl -> fold__stack tl ~init:((f [@zero_alloc assume]) init hd) ~f
+  ;;
 end
 
 [@@@end]
@@ -257,13 +200,8 @@ end
 
   let[@alloc] f x = x]]
 
-include struct
-  let f x = x
-end [@@ocaml.doc " @inline "]
-
-include struct
-  let f x = x
-end [@@ocaml.doc " @inline "]
+let f x = x
+let f x = x
 
 [@@@end]
 
@@ -290,8 +228,9 @@ end [@@ocaml.doc " @inline "]
     module [@alloc a' @ m'] Inner2 = struct
       let f (x @ m') = x [@exclave_if_stack a']
     end
-  end
+  end]
 
+  [%%template
   (* You can pun on [heap] and [stack] directly. *)
   module [@alloc heap] Outer2 = struct
     let f x = x
@@ -301,64 +240,46 @@ end [@@ocaml.doc " @inline "]
     let f x = exclave_ x
   end]]
 
-include struct
-  module Outer1 = struct
-    let f x = x
-    and f__stack x = exclave_ x
+module Outer1 = struct
+  let f x = x
+  and f__stack x = exclave_ x
 
-    include struct
-      module Inner1 = struct
-        let f (x @ global) = x
-      end
-
-      module Inner2 = struct
-        let f (x @ global) = x
-      end
-    end [@@ocaml.doc " @inline "]
+  module Inner1 = struct
+    let f (x @ global) = x
   end
 
-  module Outer2 = struct
-    let f x = x
+  module Inner2 = struct
+    let f (x @ global) = x
+  end
+end
+
+module Outer1__stack = struct
+  let f x = x
+  and f__stack x = exclave_ x
+
+  module Inner1 = struct
+    let f (x @ global) = x
   end
 
-  module Outer3__stack = struct
-    let f x = exclave_ x
-  end
-end [@@ocaml.doc " @inline "]
-
-include struct
-  module Outer1__stack = struct
-    let f x = x
-    and f__stack x = exclave_ x
-
-    include struct
-      module Inner1 = struct
-        let f (x @ global) = x
-      end
-
-      module Inner2 = struct
-        let f (x @ global) = x
-      end
-    end [@@ocaml.doc " @inline "]
-
-    include struct
-      module Inner1__stack = struct
-        let f (local_ x) = exclave_ x
-      end
-
-      module Inner2__stack = struct
-        let f (local_ x) = exclave_ x
-      end
-    end [@@ocaml.doc " @inline "]
+  module Inner2 = struct
+    let f (x @ global) = x
   end
 
-  module Outer2 = struct
-    let f x = x
+  module Inner1__stack = struct
+    let f (local_ x) = exclave_ x
   end
 
-  module Outer3__stack = struct
-    let f x = exclave_ x
+  module Inner2__stack = struct
+    let f (local_ x) = exclave_ x
   end
-end [@@ocaml.doc " @inline "]
+end
+
+module Outer2 = struct
+  let f x = x
+end
+
+module Outer3__stack = struct
+  let f x = exclave_ x
+end
 
 [@@@end]

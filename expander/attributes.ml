@@ -70,8 +70,26 @@ end
 
 module Make_maybe_explicit
     (Attribute : Attribute_arg)
-    (Context : Context_arg with module Attribute := Attribute) =
-struct
+    (Context : Context_arg with module Attribute := Attribute) : sig
+  module Attribute_map : sig
+    type ('w, 'b) t =
+      ( 'w Context.packed
+        , ('w, 'b) With_attribute_maybe_explicit(Context)(Attribute).t )
+        Map_poly.t
+
+    val find_exn
+      :  ('w, 'b) t
+      -> ('a, 'w) Context.t
+      -> ('a, 'b) Attribute.t Maybe_explicit.Both.t
+  end
+
+  val declare
+    :  name:string
+    -> contexts:'w Context.packed list
+    -> pattern:(payload, 'b, 'c) Ast_pattern.t
+    -> k:'b
+    -> ('w, 'c) Attribute_map.t
+end = struct
   module Attribute_map = struct
     type ('w, 'b) t =
       ( 'w Context.packed
@@ -107,8 +125,21 @@ end
 
 module Make
     (Attribute : Attribute_arg)
-    (Context : Context_arg with module Attribute := Attribute) =
-struct
+    (Context : Context_arg with module Attribute := Attribute) : sig
+  module Attribute_map : sig
+    type ('w, 'b) t =
+      ('w Context.packed, ('w, 'b) With_attribute(Context)(Attribute).t) Map_poly.t
+
+    val find_exn : ('w, 'b) t -> ('a, 'w) Context.t -> ('a, 'b) Attribute.t
+  end
+
+  val declare
+    :  name:string
+    -> contexts:'w Context.packed list
+    -> pattern:(payload, 'b, 'c) Ast_pattern.t
+    -> k:'b
+    -> ('w, 'c) Attribute_map.t
+end = struct
   module Attribute_map = struct
     type ('w, 'b) t =
       ('w Context.packed, ('w, 'b) With_attribute(Context)(Attribute).t) Map_poly.t
@@ -334,17 +365,26 @@ let error_you_can_only_use_one_attribute_per_axis ~loc =
         E.g. you cannot have [let f = ... [@@mode.explicit x] [@@mode y]].")
 ;;
 
-let consume_attr attr ctx ast =
+let consume_attr
+  : 'a 'b 'c.
+  ('a, 'b) Attribute_map.t
+  -> ('c, 'a) Context.t
+  -> 'c
+  -> ('c * (Maybe_explicit.explicitness * 'b, Syntax_error.t) result) option
+  =
+  fun attr ctx ast ->
   Maybe_explicit.Both.opt_fold_map
     (Attribute_map.find_exn attr ctx)
     ~init:ast
     ~f:(fun ast attr ->
-      match Attribute.consume attr ast with
-      | None -> ast, None
-      | Some (ast, res) -> ast, Some res)
+      match Attribute.consume_res attr ast with
+      | Ok None -> ast, None
+      | Ok (Some (ast, res)) -> ast, Some (Ok res)
+      | Error errors -> ast, Some (Error (Syntax_error.of_location_errors errors)))
   |> function
   | _, Neither -> None
-  | ast, One res -> Some (ast, Ok res)
+  | ast, One (explicitness, Ok res) -> Some (ast, Ok (explicitness, res))
+  | ast, One (_, Error err) -> Some (ast, Error err)
   | ast, Both _ ->
     let loc = Context.location ctx ast in
     Some (ast, error_you_can_only_use_one_attribute_per_axis ~loc)
@@ -353,7 +393,10 @@ let consume_attr attr ctx ast =
 type ('w, 'b) t = { f : 'a. ('a, 'w) Context.t -> 'a -> 'a * ('b, Syntax_error.t) result }
 [@@unboxed]
 
-let consume t ctx item =
+let consume
+  : 'a 'b 'c. ('a, 'b) t -> ('c, 'a) Context.t -> 'c -> ('c * 'b, Syntax_error.t) result
+  =
+  fun t ctx item ->
   let item, res = t.f ctx item in
   match res with
   | Ok value -> Ok (item, value)
@@ -374,7 +417,13 @@ module Poly = struct
     ]
   ;;
 
-  let declare name =
+  let declare
+    :  label
+    -> ( 'w
+         , (Untyped.Pattern.t * Untyped.Expression.t loc Nonempty_list.t) loc list )
+         Attribute_map.t
+    =
+    fun name ->
     declare ~name ~contexts ~pattern:(Ast_pattern_helpers.bindings ()) ~k:Fn.id
   ;;
 
@@ -564,8 +613,20 @@ module Hint = struct
   let no_sets_in attr = Printf.sprintf "sets not allowed in [[@@%s]] attributes" attr
 end
 
-let consume_poly ctx item =
-  let consume attr item =
+let consume_poly
+  : 'a.
+  ('a, 'w) Context.t
+  -> 'a
+  -> 'a * ((Maybe_explicit.explicitness * Poly.t) list, Syntax_error.t) result
+  =
+  fun ctx item ->
+  let consume
+    : 'b.
+    ('w, 'b) Attribute_map.t
+    -> 'a
+    -> 'a * (Maybe_explicit.explicitness * 'b, Syntax_error.t) result option
+    =
+    fun attr item ->
     match consume_attr attr ctx item with
     | None -> item, None
     | Some (item, bindings) -> item, Some bindings
@@ -702,7 +763,15 @@ module Mono = struct
     [ T Expression; T Module_expr; T Core_type; T Module_type ]
   ;;
 
-  let declare name expected =
+  let declare
+    : 'a.
+    string
+    -> 'a Type.non_tuple Type.t
+    -> ( 'w
+         , (Typed.Expression.Basic.packed loc list, Syntax_error.t) result )
+         Attribute_map.t
+    =
+    fun name expected ->
     declare
       ~name
       ~contexts
@@ -730,8 +799,25 @@ module Mono = struct
   let synchro_attr = declare "synchro" Type.synchro
 end
 
-let consume_mono ctx item =
-  let consume mono axis attr item =
+let consume_mono
+  : 'c.
+  ('c, 'w) Context.t
+  -> 'c
+  -> 'c
+     * ( Typed.Expression.Basic.packed loc list Maybe_explicit.t Typed.Axis.Map.t
+         , Syntax_error.t )
+         result
+  =
+  fun ctx item ->
+  let consume
+    : 'a 'b.
+    ('a Maybe_explicit.t Typed.Axis.Map.t, Syntax_error.t) result
+    -> 'b Typed.Axis.t
+    -> ('w, ('a, Syntax_error.t) result) Attribute_map.t
+    -> 'c
+    -> 'c * ('a Maybe_explicit.t Typed.Axis.Map.t, Syntax_error.t) result
+    =
+    fun mono axis attr item ->
     match consume_attr attr ctx item with
     | None -> item, mono
     | Some (item, vals) ->
@@ -790,11 +876,22 @@ module Floating = struct
   module Poly = struct
     include Make_maybe_explicit (Attribute.Floating) (Context)
 
-    let convert_attrs attrs ctx ast =
+    let convert_attrs
+      : 'a 'b 'c.
+      ('a, ('b, Syntax_error.t) result) Attribute_map.t list
+      -> ('c, 'a) Context.t
+      -> 'c
+      -> ('b Maybe_explicit.t, Syntax_error.t) result option
+      =
+      fun attrs ctx ast ->
       attrs
       |> List.map ~f:(fun attr -> Attribute_map.find_exn attr ctx)
       |> Maybe_explicit.Both.all
-      |> Maybe_explicit.Both.opt_map ~f:(fun attr -> Attribute.Floating.convert attr ast)
+      |> Maybe_explicit.Both.opt_map ~f:(fun attr ->
+        match Attribute.Floating.convert_res attr ast with
+        | Ok None -> None
+        | Ok (Some res) -> Some res
+        | Error errs -> Some (Error (Syntax_error.of_location_errors errs)))
       |> function
       | Neither -> None
       | One res -> Some (Maybe_explicit.ok res)
@@ -817,7 +914,13 @@ module Floating = struct
       ; kind : kind
       }
 
-    let declare name type_check =
+    let declare
+      :  label
+      -> ((Untyped.Pattern.t * Untyped.Expression.t loc Nonempty_list.t) loc list
+          -> (Poly.t, Type_error.t) result)
+      -> ('w, (t, Syntax_error.t) result) Attribute_map.t list
+      =
+      fun name type_check ->
       List.map
         [ Never_add_mangler; Always_add_mangler; Add_mangler_if_more_than_one_elt ]
         ~f:(fun kind ->
@@ -966,7 +1069,13 @@ module Floating = struct
         |> List.exists ~f:(fun attr_name -> String.equal attr_name ast_attr_name)
     ;;
 
-    let convert ctx ast =
+    let convert
+      : 'a.
+      ('a, [ `signature_item | `structure_item ]) Context.t
+      -> 'a
+      -> (t Maybe_explicit.t option, Syntax_error.t) result
+      =
+      fun ctx ast ->
       match convert_attrs all_attrs ctx ast with
       | None -> Ok None
       | Some (Ok value) -> Ok (Some value)
@@ -980,7 +1089,16 @@ module Floating = struct
 
     type t = Define : 'a Type.non_tuple Binding.t list -> t
 
-    let declare name type_check =
+    let declare
+      : 'a.
+      label
+      -> ((Untyped.Pattern.t * Untyped.Expression.t loc) loc list
+          -> ('a Type.non_tuple Binding.t list, Type_error.t) result)
+      -> ( [ `signature_item | `structure_item ]
+           , (t, Syntax_error.t) result )
+           Attribute_map.t
+      =
+      fun name type_check ->
       declare
         ~name:(name ^ ".define")
         ~contexts
@@ -1010,14 +1128,21 @@ module Floating = struct
 
     let all_attrs = [ kind ]
 
-    let convert ctx ast =
+    let convert
+      : 'a.
+      ('a, [ `signature_item | `structure_item ]) Context.t
+      -> 'a
+      -> (t option, Syntax_error.t) result
+      =
+      fun ctx ast ->
       List.map all_attrs ~f:(fun attr -> Attribute_map.find_exn attr ctx)
       |> fun attr ->
-      Attribute.Floating.convert attr ast
+      Attribute.Floating.convert_res attr ast
       |> function
-      | None -> Ok None
-      | Some (Ok value) -> Ok (Some value)
-      | Some (Error _ as err) -> err
+      | Ok None -> Ok None
+      | Ok (Some (Ok value)) -> Ok (Some value)
+      | Ok (Some (Error _ as err)) -> err
+      | Error errs -> Error (Syntax_error.of_location_errors errs)
     ;;
   end
 
@@ -1025,7 +1150,13 @@ module Floating = struct
     | Define of Define.t
     | Poly of Poly.t Maybe_explicit.t
 
-  let convert (type a) (ctx : (a, _) Context.t) (ast : a) =
+  let convert
+    : 'a.
+    ('a, [ `signature_item | `structure_item ]) Context.t
+    -> 'a
+    -> (t option, Syntax_error.t) result
+    =
+    fun (type a) (ctx : (a, _) Context.t) (ast : a) ->
     let* define = Define.convert ctx ast in
     let* poly = Poly.convert ctx ast in
     match define, poly with
@@ -1044,9 +1175,21 @@ module Non_explicit = struct
   (* We don't want to shadow from [Make_maybe_explicit] *)
   open Make (Attribute) (Context)
 
-  let consume_attr_if attr =
-    let consume_attr attr ctx ast =
-      Attribute.consume (Attribute_map.find_exn attr ctx) ast
+  let consume_attr_if
+    : 'a 'b. ('a, ('b, Syntax_error.t) result) Attribute_map.t -> ('a, 'b option) t
+    =
+    fun attr ->
+    let consume_attr
+      : 'a 'b 'c.
+      ('a, ('b, Syntax_error.t) result) Attribute_map.t
+      -> ('c, 'a) Context.t
+      -> 'c
+      -> ('c * ('b, Syntax_error.t) result) option
+      =
+      fun attr ctx ast ->
+      match Attribute.consume_res (Attribute_map.find_exn attr ctx) ast with
+      | Ok x -> x
+      | Error errors -> Some (ast, Error (Syntax_error.of_location_errors errors))
     in
     { f =
         (fun ctx item ->
@@ -1188,7 +1331,14 @@ module Non_explicit = struct
       | Some (loc, _) -> Error (Reason.Error.cannot_have_exclave_reasons ~name ~loc)
     ;;
 
-    let declare name expected handle_reasons =
+    let declare
+      : 'a 'b.
+      label
+      -> 'a Type.t
+      -> (name:label -> (location * label loc list) option -> ('b, Syntax_error.t) result)
+      -> ('w, (('a, 'b) t, Syntax_error.t) result) Attribute_map.t
+      =
+      fun name expected handle_reasons ->
       let pattern = pattern () in
       declare
         ~name
@@ -1224,7 +1374,10 @@ module Non_explicit = struct
       |> map2' ~f:(fun loc mode args -> loc, mode, args)
     ;;
 
-    let declare name expected =
+    let declare
+      : 'a. label -> 'a Type.t -> ('w, ('a t, Syntax_error.t) result) Attribute_map.t
+      =
+      fun name expected ->
       declare
         ~name
         ~contexts:[ T Expression; T Value_binding; T Value_description ]

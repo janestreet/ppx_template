@@ -87,33 +87,12 @@ and id__'bits64_float64' = M.id__'bits64_float64'
 and id__'bits64_float32' = M.id__'bits64_float32'
 and id__'bits64_value_or_null' = M.id__'bits64_value_or_null'
 
-include struct
-  include struct
-    let const2__value__'value_mod_contended' _ _ x = x
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    let const2__value__'value_or_null_mod_contended' _ _ x = x
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    let const2__value__bits64 _ _ x = x
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
-
-include struct
-  include struct
-    let const2__value_or_null__'value_mod_contended' _ _ x = x
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    let const2__value_or_null__'value_or_null_mod_contended' _ _ x = x
-  end [@@ocaml.doc " @inline "]
-
-  include struct
-    let const2__value_or_null__bits64 _ _ x = x
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
+let const2__value__'value_mod_contended' _ _ x = x
+let const2__value__'value_or_null_mod_contended' _ _ x = x
+let const2__value__bits64 _ _ x = x
+let const2__value_or_null__'value_mod_contended' _ _ x = x
+let const2__value_or_null__'value_or_null_mod_contended' _ _ x = x
+let const2__value_or_null__bits64 _ _ x = x
 
 [@@@end]
 
@@ -169,68 +148,56 @@ module type S__''mini_base'' = sig
   [@@@ocaml.text "/*"]
 end
 
-include struct
-  include struct
-    module type S2 = sig
-      include S
+module type S2 = sig
+  include S
 
-      val const2 : 'c -> (('a : value) -> ('b : value) -> 'c)
-    end
-  end [@@ocaml.doc " @inline "]
+  val const2 : 'c -> (('a : value) -> ('b : value) -> 'c)
+end
 
-  include struct
-    module type S2__''value''__''mini_base'' = sig
-      include S
+module type S2__''value''__''mini_base'' = sig
+  include S
 
-      val const2 : 'c -> (('a : value) -> ('b : value) -> 'c)
+  val const2 : 'c -> (('a : value) -> ('b : value) -> 'c)
 
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      val const2__value__bits64 : 'c -> (('a : value) -> ('b : bits64) -> 'c)
-      val const2__value__bits32 : 'c -> (('a : value) -> ('b : bits32) -> 'c)
+  val const2__value__bits64 : 'c -> (('a : value) -> ('b : bits64) -> 'c)
+  val const2__value__bits32 : 'c -> (('a : value) -> ('b : bits32) -> 'c)
 
-      [@@@ocaml.text "/*"]
-    end
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
+  [@@@ocaml.text "/*"]
+end
 
-include struct
-  include struct
-    module type S2__''mini_base''__''value'' = sig
-      include S__''mini_base''
+module type S2__''mini_base''__''value'' = sig
+  include S__''mini_base''
 
-      val const2 : 'c -> (('a : value) -> ('b : value) -> 'c)
+  val const2 : 'c -> (('a : value) -> ('b : value) -> 'c)
 
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      val const2__bits64__value : 'c -> (('a : bits64) -> ('b : value) -> 'c)
-      val const2__bits32__value : 'c -> (('a : bits32) -> ('b : value) -> 'c)
+  val const2__bits64__value : 'c -> (('a : bits64) -> ('b : value) -> 'c)
+  val const2__bits32__value : 'c -> (('a : bits32) -> ('b : value) -> 'c)
 
-      [@@@ocaml.text "/*"]
-    end
-  end [@@ocaml.doc " @inline "]
+  [@@@ocaml.text "/*"]
+end
 
-  include struct
-    module type S2__''mini_base''__''mini_base'' = sig
-      include S__''mini_base''
+module type S2__''mini_base''__''mini_base'' = sig
+  include S__''mini_base''
 
-      val const2 : 'c -> (('a : value) -> ('b : value) -> 'c)
+  val const2 : 'c -> (('a : value) -> ('b : value) -> 'c)
 
-      [@@@ocaml.text "/*"]
+  [@@@ocaml.text "/*"]
 
-      val const2__value__bits64 : 'c -> (('a : value) -> ('b : bits64) -> 'c)
-      val const2__value__bits32 : 'c -> (('a : value) -> ('b : bits32) -> 'c)
-      val const2__bits64__value : 'c -> (('a : bits64) -> ('b : value) -> 'c)
-      val const2__bits64__bits64 : 'c -> (('a : bits64) -> ('b : bits64) -> 'c)
-      val const2__bits64__bits32 : 'c -> (('a : bits64) -> ('b : bits32) -> 'c)
-      val const2__bits32__value : 'c -> (('a : bits32) -> ('b : value) -> 'c)
-      val const2__bits32__bits64 : 'c -> (('a : bits32) -> ('b : bits64) -> 'c)
-      val const2__bits32__bits32 : 'c -> (('a : bits32) -> ('b : bits32) -> 'c)
+  val const2__value__bits64 : 'c -> (('a : value) -> ('b : bits64) -> 'c)
+  val const2__value__bits32 : 'c -> (('a : value) -> ('b : bits32) -> 'c)
+  val const2__bits64__value : 'c -> (('a : bits64) -> ('b : value) -> 'c)
+  val const2__bits64__bits64 : 'c -> (('a : bits64) -> ('b : bits64) -> 'c)
+  val const2__bits64__bits32 : 'c -> (('a : bits64) -> ('b : bits32) -> 'c)
+  val const2__bits32__value : 'c -> (('a : bits32) -> ('b : value) -> 'c)
+  val const2__bits32__bits64 : 'c -> (('a : bits32) -> ('b : bits64) -> 'c)
+  val const2__bits32__bits32 : 'c -> (('a : bits32) -> ('b : bits32) -> 'c)
 
-      [@@@ocaml.text "/*"]
-    end
-  end [@@ocaml.doc " @inline "]
-end [@@ocaml.doc " @inline "]
+  [@@@ocaml.text "/*"]
+end
 
 [@@@end]
 
@@ -251,51 +218,37 @@ end [@@ocaml.doc " @inline "]
   ;;]
 
 module Array__''bits64'' = struct
-  include struct
-    type ('a : bits64) t__bits64 = 'a array
+  type ('a : bits64) t__bits64 = 'a array
 
-    let singleton__bits64 (x : (_ : bits64)) = [| x |]
-  end [@@ocaml.doc " @inline "]
+  let singleton__bits64 (x : (_ : bits64)) = [| x |]
 end
 
 module Array__'''base_or_null_mod_separable''' = struct
-  include struct
-    type ('a : bits64 mod separable) t__'bits64_mod_separable' = 'a array
+  type ('a : bits64 mod separable) t__'bits64_mod_separable' = 'a array
 
-    let singleton__'bits64_mod_separable' (x : (_ : bits64 mod separable)) = [| x |]
-  end [@@ocaml.doc " @inline "]
+  let singleton__'bits64_mod_separable' (x : (_ : bits64 mod separable)) = [| x |]
 
-  include struct
-    type ('a : bits32 mod separable) t__'bits32_mod_separable' = 'a array
+  type ('a : bits32 mod separable) t__'bits32_mod_separable' = 'a array
 
-    let singleton__'bits32_mod_separable' (x : (_ : bits32 mod separable)) = [| x |]
-  end [@@ocaml.doc " @inline "]
+  let singleton__'bits32_mod_separable' (x : (_ : bits32 mod separable)) = [| x |]
 
-  include struct
-    type ('a : word mod separable) t__'word_mod_separable' = 'a array
+  type ('a : word mod separable) t__'word_mod_separable' = 'a array
 
-    let singleton__'word_mod_separable' (x : (_ : word mod separable)) = [| x |]
-  end [@@ocaml.doc " @inline "]
+  let singleton__'word_mod_separable' (x : (_ : word mod separable)) = [| x |]
 
-  include struct
-    type ('a : float64 mod separable) t__'float64_mod_separable' = 'a array
+  type ('a : float64 mod separable) t__'float64_mod_separable' = 'a array
 
-    let singleton__'float64_mod_separable' (x : (_ : float64 mod separable)) = [| x |]
-  end [@@ocaml.doc " @inline "]
+  let singleton__'float64_mod_separable' (x : (_ : float64 mod separable)) = [| x |]
 
-  include struct
-    type ('a : float32 mod separable) t__'float32_mod_separable' = 'a array
+  type ('a : float32 mod separable) t__'float32_mod_separable' = 'a array
 
-    let singleton__'float32_mod_separable' (x : (_ : float32 mod separable)) = [| x |]
-  end [@@ocaml.doc " @inline "]
+  let singleton__'float32_mod_separable' (x : (_ : float32 mod separable)) = [| x |]
 
-  include struct
-    type ('a : value_or_null mod separable) t__'value_or_null_mod_separable' = 'a array
+  type ('a : value_or_null mod separable) t__'value_or_null_mod_separable' = 'a array
 
-    let singleton__'value_or_null_mod_separable' (x : (_ : value_or_null mod separable)) =
-      [| x |]
-    ;;
-  end [@@ocaml.doc " @inline "]
+  let singleton__'value_or_null_mod_separable' (x : (_ : value_or_null mod separable)) =
+    [| x |]
+  ;;
 end
 
 let arr =

@@ -79,17 +79,17 @@ let expr =
        with
        | Pexp_hole, Ptyp_any (Some jkind) ->
          let rec of_jkind : jkind_annotation -> Expression.t = function
-           | { pjkind_desc = Pjk_abbreviation ident; _ } ->
+           | { pjka_desc = Pjk_abbreviation { txt = Lident ident; _ }; _ } ->
              Typed (Identifier { ident }, P (Non_tuple Kind))
-           | { pjkind_desc = Pjk_mod (jkind, mode :: modes); _ } ->
+           | { pjka_desc = Pjk_mod (jkind, mode :: modes); _ } ->
              let modes =
                Nonempty_list.map (mode :: modes) ~f:(fun { txt = Mode ident; _ } ->
                  Expression.Identifier { ident })
              in
              Kind_mod (of_jkind jkind, modes)
-           | { pjkind_desc = Pjk_product (jkind :: jkinds); _ } ->
+           | { pjka_desc = Pjk_product (jkind :: jkinds); _ } ->
              Kind_product (Nonempty_list.map (jkind :: jkinds) ~f:of_jkind)
-           | { pjkind_loc = loc; _ } -> expected ~loc "kind abbreviation, mod, or product"
+           | { pjka_loc = loc; _ } -> expected ~loc "kind abbreviation, mod, or product"
          in
          of_jkind jkind
        | _ -> expected ~loc "(_ : (_ : <kind>))")

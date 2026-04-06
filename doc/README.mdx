@@ -248,56 +248,19 @@ end
 (* expands to *)
 
 module%template T_attached = struct
-  (* floating attributes introduce a scope so that, e.g., [open]s don't bleed into later templates *)
-  include struct
-    type ('a : k) t = { x : 'a }
-    [@@kind k = bits32]
+  type ('a : k) t = { x : 'a } [@@kind k = bits32]
 
-    include struct
-      let wrap (x @ p) = { x }
-      [@@kind k = bits32]
-      [@@mode p = nonportable]
+  let wrap (x @ p) = { x } [@@kind k = bits32] [@@mode p = nonportable]
+  let unwrap ({ x } @ p) = x [@@kind k = bits32] [@@mode p = nonportable]
+  let wrap (x @ p) = { x } [@@kind k = bits32] [@@mode p = portable]
+  let unwrap ({ x } @ p) = x [@@kind k = bits32] [@@mode p = portable]
 
-      let unwrap ({ x } @ p) = x
-      [@@kind k = bits32]
-      [@@mode p = nonportable]
-    end
+  type ('a : k) t = { x : 'a } [@@kind k = bits64]
 
-    include struct
-      let wrap (x @ p) = { x }
-      [@@kind k = bits32]
-      [@@mode p = portable]
-
-      let unwrap ({ x } @ p) = x
-      [@@kind k = bits32]
-      [@@mode p = portable]
-    end
-  end
-
-  include struct
-    type ('a : k) t = { x : 'a }
-    [@@kind k = bits64]
-
-    include struct
-      let wrap (x @ p) = { x }
-      [@@kind k = bits64]
-      [@@mode p = nonportable]
-
-      let unwrap ({ x } @ p) = x
-      [@@kind k = bits64]
-      [@@mode p = nonportable]
-    end
-
-    include struct
-      let wrap (x @ p) = { x }
-      [@@kind k = bits64]
-      [@@mode p = portable]
-
-      let unwrap ({ x } @ p) = x
-      [@@kind k = bits64]
-      [@@mode p = portable]
-    end
-  end
+  let wrap (x @ p) = { x } [@@kind k = bits64] [@@mode p = nonportable]
+  let unwrap ({ x } @ p) = x [@@kind k = bits64] [@@mode p = nonportable]
+  let wrap (x @ p) = { x } [@@kind k = bits64] [@@mode p = portable]
+  let unwrap ({ x } @ p) = x [@@kind k = bits64] [@@mode p = portable]
 end
 
 (* is equivalent to *)
@@ -388,7 +351,7 @@ can't be re-used in a manner that inspects its contents in a different
 ```ocaml
 # let%template id (x : (_ : k)) = x [@@kind k = all]
 Line 1, characters 27-28:
-Error: Unknown layout all
+Error: Unbound kind all
 ```
 
 However, that name can (and should) still be used in `mono` attributes
@@ -1151,10 +1114,7 @@ end
 
 ## Type and module substitutions
 
-Type substitutions (using `:=`) are generally supported, but can sometimes get dropped due
-to scoping issues. In particular, `ppx_template` may wrap certain constructs inside a
-`include sig ... end`, and type substitutions are only visible to the immediately
-enclosing signature. For example, these are fine:
+Type substitutions (using `:=`) are supported. For example:
 
 ```ocaml
 module type%template A = sig
@@ -1168,11 +1128,7 @@ module type B = sig
   type%template ('a : k) t := 'a [@@kind k = (bits64, float64)]
   type%template nonrec 'a t = 'a t [@kind k] [@@kind k = (bits64, float64)]
 end
-```
 
-But this is not:
-
-```ocaml
 module type C = sig
   [%%template:
   [@@@kind.default k = (bits64, float64)]
@@ -1182,13 +1138,8 @@ module type C = sig
   type%template nonrec 'a t = 'a t [@kind k] [@@kind k = (bits64, float64)]
 end
 ```
-```mdx-error
-Line 7, characters 36-37:
-Error: Unbound type constructor t__bits64
-```
 
-Module type substitutions are supported, but are constrained by the same limitation
-described above. These are fine:
+Module type substitutions are also supported. For example:
 
 ```ocaml
 module type%template A = sig
@@ -1202,11 +1153,7 @@ module type B = sig
   module type%template S := sig end [@@kind k = (bits64, float64)]
   module type%template S = S [@kind k] [@@kind k = (bits64, float64)]
 end
-```
 
-But this is not:
-
-```ocaml
 module type C = sig
   [%%template:
   [@@@kind.default k = (bits64, float64)]
@@ -1215,10 +1162,6 @@ module type C = sig
 
   module type%template S = S [@kind k] [@@kind k = (bits64, float64)]
 end
-```
-```mdx-error
-Line 7, characters 30-31:
-Error: Unbound module type S__bits64
 ```
 
 Module substitutions are not supported due to missing support for attributes in the

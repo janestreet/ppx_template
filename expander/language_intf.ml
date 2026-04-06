@@ -57,20 +57,20 @@ module Definitions = struct
     (*_ Note: we only provide concrete definitions for these types so that the compiler
         knows they are distinct. They are [private] so that they can only ever be used as
         phantom types. *)
-    type kind_ = private Kind
+    type kind__ = private Kind
     type mode_ = private Mode
     type modality_ = private Modality
     type alloc_ = private Alloc
     type synchro_ = private Synchro
 
     type _ non_tuple =
-      | Kind : kind_ non_tuple
+      | Kind : kind__ non_tuple
       | Mode : mode_ non_tuple
       | Modality : modality_ non_tuple
       | Alloc : alloc_ non_tuple
       | Synchro : synchro_ non_tuple
 
-    type kind = kind_ non_tuple
+    type kind = kind__ non_tuple
     type mode = mode_ non_tuple
     type modality = modality_ non_tuple
     type alloc = alloc_ non_tuple

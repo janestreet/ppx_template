@@ -37,59 +37,55 @@
       end]
   end]]
 
-include struct
-  module type S = sig
+module type S = sig
+  type t
+
+  module M : sig
     type t
-
-    module M : sig
-      type t
-    end
   end
+end
 
-  module type S_int = S with type t = int with type M.t = int
+module type S_int = S with type t = int with type M.t = int
 
-  module type S_mono = sig
-    type t
+module type S_mono = sig
+  type t
 
-    include S with type t := t with type M.t := t
-  end
-end [@@ocaml.doc " @inline "]
+  include S with type t := t with type M.t := t
+end
 
-include struct
-  module type S__''value_with_imm'' = sig
+module type S__''value_with_imm'' = sig
+  type t__immediate
+  and t__immediate64
+  and t
+
+  module M : sig
     type t__immediate
     and t__immediate64
     and t
-
-    module M : sig
-      type t__immediate
-      and t__immediate64
-      and t
-    end
   end
+end
 
-  module type S_int__''value_with_imm'' =
+module type S_int__''value_with_imm'' =
+  S__''value_with_imm''
+  with type t__immediate = int
+   and type t__immediate64 = int
+   and type t = int
+  with type M.t__immediate = int
+   and type M.t__immediate64 = int
+   and type M.t = int
+
+module type S_mono__''value_with_imm'' = sig
+  type t
+
+  include
     S__''value_with_imm''
-    with type t__immediate = int
-     and type t__immediate64 = int
-     and type t = int
-    with type M.t__immediate = int
-     and type M.t__immediate64 = int
-     and type M.t = int
-
-  module type S_mono__''value_with_imm'' = sig
-    type t
-
-    include
-      S__''value_with_imm''
-      with type t__immediate := t
-       and type t__immediate64 := t
-       and type t := t
-      with type M.t__immediate := t
-       and type M.t__immediate64 := t
-       and type M.t := t
-  end
-end [@@ocaml.doc " @inline "]
+    with type t__immediate := t
+     and type t__immediate64 := t
+     and type t := t
+    with type M.t__immediate := t
+     and type M.t__immediate64 := t
+     and type M.t := t
+end
 
 [@@@end]
 
@@ -140,6 +136,5 @@ module type S_extended = sig
     end
   with module N = P
   with module O := P
- [@ocaml.doc " @inline "]
 
 [@@@end]

@@ -6,6 +6,12 @@ type explicitness =
 
 type 'a t = explicitness * 'a
 
+let most_explicit t1 t2 =
+  match t1, t2 with
+  | Explicit, _ | _, Explicit -> Explicit
+  | Drop_axis_if_all_defaults, Drop_axis_if_all_defaults -> Drop_axis_if_all_defaults
+;;
+
 let map t ~f = Import.map_snd t ~f
 
 let ok = function

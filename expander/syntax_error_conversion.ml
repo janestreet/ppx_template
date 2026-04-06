@@ -8,7 +8,7 @@ let explicitly_drop =
 
     method! attribute attr =
       Attribute.mark_as_handled_manually attr;
-      attr
+      super#attribute attr
 
     method! attributes attrs =
       let _ : attribute list = super#attributes attrs in
