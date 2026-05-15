@@ -264,6 +264,16 @@ module Definitions = struct
       module Basic = struct
         type packed = P : 'a Type.non_tuple t -> packed [@@unboxed]
       end
+
+      module Defaultness = struct
+        type t =
+          | Actual_default (** Actual defaults in the mode/kind system. *)
+          | Default_for_standard_mangling
+          (** The special case of [[@kind value_or_null]] is mangled as default for
+              pragmatic reasons. [[@kind.explicit_plus_unmangled value_or_null]] is not
+              treated as default. *)
+          | Not_a_default (** Values that are not a default for any purpose. *)
+      end
     end
 
     module Pattern = struct
@@ -276,70 +286,16 @@ module Definitions = struct
         | [] : unit tuple
         | ( :: ) : 'a t * 'b tuple -> ('a * 'b) tuple
     end
+  end
 
-    module Env = struct
-      (** An association list mapping identifiers to values. Entries are added to the
-          front of the association list, and looked up from front to back, so newer
-          entries shadow older ones. *)
-
-      type lookup =
-        | Preserve_atoms
-        (** When evaluating, do not expand identifiers into the set they represent. This
-            form of lookup is used when evaluating set mono and poly attributes for the
-            purposes of mangling, because we mangle by _names_ of sets, not canonical
-            representations of their contents. *)
-        | Expand_atoms_bound_to_sets
-        (** When evaluating, fully expand all identifiers. This form of lookup is used
-            when evaluating the right hand side of a non-set binding, since here we wish
-            to bind the pattern on the left against all values in the set on the right *)
-
-      module Entry = struct
-        type 'a entry =
-          { ident : 'a Identifier.t
-          ; preserve_atoms : 'a Value.t
-          (** A non-union-containing "alias" of this name. e.g. in
-              [[@kind_set ks = value_with_imm]], the ident [value_with_imm] *)
-          ; expand_atoms_bound_to_sets : 'a Value.t Nonempty_list.t
-          (** The full set. e.g. in [[@kind_set ks = value_with_imm]], the list of idents
-              [value], [immediate], [immediate64]. For names that are not obviously bound
-              to sets, this is just the singleton set containing [preserve_atoms] *)
-          ; namespace : 'a Axis.Namespace.t
-          }
-
-        type t = Entry : _ entry -> t
-      end
-
-      type t = Entry.t list
-    end
-
-    module Binding = struct
-      type 'a t =
-        { pattern : 'a Pattern.t
-        ; expression : ('a, Expression.set) Expression.t Loc.t
-        ; lookup : Env.lookup
-        }
-
-      type ('a, 'mangle) with_mangle =
-        { binding : 'a t
-        ; mangle : 'a Value.t -> 'mangle Value.t
-        (** When an item [let lhs = rhs [@@attr pat = (expr1, expr2)]] is evaluated e.g.
-            on [expr1], the expression gets evaluated to a [Value.t], which is then passed
-            to [mangle] to create a [Mangler.t] that is used to mangle [lhs]. This is used
-            to enable [[@@alloc (a @ m) = ...]] to mangle only based on [a]. *)
-        ; mangle_axis : 'mangle Axis.t
-        }
-        constraint 'mangle = _ Type.non_tuple
-    end
-
-    module Node = struct
-      (** A type used as the output of [Value.to_node]. *)
-      type 'a t =
-        | Jkind_annotation : jkind_annotation -> Type.kind t
-        | Mode : mode loc -> Type.mode t
-        | Modality : modality loc -> Type.modality t
-        | Alloc : Type.alloc t
-        | Synchro : Type.synchro t
-    end
+  module Node = struct
+    (** A type used as the output of [Value.to_node]. *)
+    type 'a t =
+      | Jkind_annotation : jkind_annotation -> Type.kind t
+      | Mode : mode loc -> Type.mode t
+      | Modality : modality loc -> Type.modality t
+      | Alloc : Type.alloc t
+      | Synchro : Type.synchro t
   end
 
   module Type_error = struct
@@ -493,6 +449,8 @@ module type Language = sig
           include Namespace
         end
 
+        val sexp_of_t : _ t -> Sexp.t
+        val same_namespace : 'a t -> 'b t -> bool
         val of_value : is_set:bool -> 'a Value.t -> 'a t
       end
     end
@@ -501,6 +459,8 @@ module type Language = sig
       include module type of struct
         include Identifier
       end
+
+      val equal_witness : 'a t -> 'b t -> ('a, 'b) Stdlib.Type.eq option
     end
 
     module Value : sig
@@ -509,9 +469,26 @@ module type Language = sig
       end
 
       val compare : 'a t -> 'a t -> int
+      val sexp_of_t : _ t -> Sexp.t
 
-      (** Checks whether a value is a default value for its axis. *)
-      val is_default : 'a Type.non_tuple t -> bool
+      (** Checks whether a value is a default value for its axis. When not using
+          [.explicit] or [.explicit_plus_unmangled] attributes, we leave identifiers
+          untemplated over a particular axis [is_default] holds for all values in the
+          mangling set for that axis.
+
+          Returns [Actual_default] for values representing actual OxCaml defaults. These
+          are the modes, kinds, etc. that OxCaml infers when there are no other
+          annotations or constraints.
+
+          Returns [Default_for_standard_mangling] for the kind [value_or_null], which is
+          mangled as if it were default for standard "poly" attributes like
+          [[@@kind k = (value_or_null, ...)]]. It is not mangled as default for
+          [[@@kind.explicit_plus_unmangled ...]].
+
+          Returns [Not_a_default] for all other values. *)
+      val defaultness : 'a Type.non_tuple t -> Defaultness.t
+
+      val as_expression : 'a t -> ('a, Expression.singleton) Expression.t
 
       (** Convert a value in the template language to a concrete OCaml AST node. *)
       val to_node : 'a Type.non_tuple t -> loc:location -> 'a Type.non_tuple Node.t
@@ -535,6 +512,7 @@ module type Language = sig
         include Expression
       end
 
+      val type_ : ('a, _) t -> 'a Type.t
       val to_set : ('a, _) t -> ('a, set) t
       val untype : ('a, 'allow_set) t -> Untyped.Expression.t
 
@@ -543,63 +521,6 @@ module type Language = sig
         -> expected:'a Type.t
         -> allow_set:(string, 's) allow_set
         -> (('a, 's) t, Type_error.t) result
-    end
-
-    module Env : sig
-      include module type of struct
-        include Env
-      end
-
-      (** An [Env.t] populated with initial bindings for [heap] and [stack] *)
-      val initial : t
-
-      val find : t -> 'a Identifier.t -> 'a Value.t option
-      val find_expanding_sets : t -> 'a Identifier.t -> 'a Value.t Nonempty_list.t option
-
-      (** [bind env ~loc ~is_set pat value] adds a new binding to [pat] in [env]. [value]
-          is used for the [preserve_atoms] entry, and its fully expanded version for the
-          [expand_atoms_bound_to_sets] entry.
-
-          Produces an [Error] if binding against this pattern would shadow an identifier
-          from a different namespace, or if evaluating value while expanding identifiers
-          produces an error. *)
-      val bind
-        :  t
-        -> loc:location
-        -> is_set:bool
-        -> 'a Pattern.t
-        -> 'a Value.t
-        -> (t, Syntax_error.t) result
-
-      (** [bind_set env ~loc ident values] adds a new set binding to [ident] in [env].
-          [ident] is used as the [preserve_atoms] entry, and [values] as the
-          [expand_atoms_bound_to_sets] entry. *)
-      val bind_set
-        :  t
-        -> loc:location
-        -> 'a Type.non_tuple Pattern.t
-        -> 'a Type.non_tuple Value.t Nonempty_list.t
-        -> (t, Syntax_error.t) result
-
-      (** Evaluate an expression in the given environment. Unbound
-          [Expression.Identifier]s are evaluated as an equivalent [Value.Identifier] under
-          the assumption that the identifier will be interpreted by the OCaml compiler; if
-          it is not, we let the compiler report the error to the user. *)
-
-      (** Evaluate a singleton expression without expanding identifiers bound to sets,
-          producing a single value. *)
-      val eval_singleton
-        :  t
-        -> ('a, Expression.singleton) Expression.t Loc.t
-        -> ('a Value.t, Syntax_error.t) result
-
-      (** Evaluate an expression that may contain unions, treating identifiers as
-          determined by [lookup]. Always produces a set of values. *)
-      val eval
-        :  t
-        -> lookup
-        -> ('a, Expression.set) Expression.t Loc.t
-        -> ('a Value.t Nonempty_list.t, Syntax_error.t) result
     end
   end
 

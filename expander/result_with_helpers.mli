@@ -20,7 +20,15 @@ module Let_syntax : sig
 end
 
 val map_error : ('a, 'b) result -> f:('b -> 'c) -> ('a, 'c) result
-val all : ('a, 'err) result list -> ('a list, 'err) result
-val all_unit : (unit, 'err) result list -> (unit, 'err) result
-val collect_errors : ('a, Syntax_error.t) result list -> ('a list, Syntax_error.t) result
-val combine_errors : ('ok, 'err) result list -> ('ok list, 'err list) result
+
+val all_errors_of_list
+  :  ('ok, 'err) result list
+  -> ('ok list, 'err Nonempty_list.t) result
+
+val syntax_errors_of_list
+  :  ('a, Syntax_error.t) result list
+  -> ('a list, Syntax_error.t) result
+
+val syntax_errors_of_unit_list
+  :  (unit, Syntax_error.t) result list
+  -> (unit, Syntax_error.t) result

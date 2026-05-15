@@ -19,7 +19,8 @@ let explicitly_drop =
 ;;
 
 let to_extension_node
-  : type a. ?also_drop:a list -> a Attributes.Context.any -> a -> Syntax_error.t -> a
+  : type a.
+    ?also_drop:a list -> a Attribute_handler.Context.any -> a -> Syntax_error.t -> a
   =
   fun ?(also_drop = []) ctx node t ->
   let extension, loc, explicitly_drop =
@@ -91,7 +92,8 @@ let to_extension_node
 ;;
 
 let to_extension_node_floating
-  : type a. a Attributes.Floating.Context.poly -> loc:location -> Syntax_error.t -> a
+  : type a.
+    a Attribute_handler.Floating.Context.poly -> loc:location -> Syntax_error.t -> a
   =
   fun ctx ~loc t ->
   let loc = { loc with loc_ghost = true } in

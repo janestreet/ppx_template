@@ -1200,6 +1200,114 @@ The following features are available for specific uses in common libraries, but 
 currently not considered sufficiently mature or principled for broader use. Consult a
 common libs dev if you feel yourself reaching for one of these features.
 
+## `.explicit`
+
+By default, poly-attributes like `[@@kind k = (value, bits64)]` omit the mangled suffix
+when all values along that axis are defaults (e.g., `value` for kind). The `.explicit`
+modifier forces the suffix to always be included:
+
+```ocaml
+# let%template id (type (a : k)) (x : a) = x [@@kind.explicit k = (value, bits64)]
+val id__value : 'a -> 'a = <fun>
+val id__bits64 : ('a : bits64). 'a -> 'a = <fun>
+```
+
+Without `.explicit`, the `value` version would be named just `id`.
+
+### `.explicit_plus_unmangled`
+
+The `.explicit_plus_unmangled` modifier is similar, but additionally generates the unmangled
+versions for instances whose values on that axis are defaults. While we usually consider
+both `value` and `value_or_null` to be default kinds, `explicit_plus_unmangled` only considers
+`value` to be the default.
+
+```ocaml
+# let%template f (type (a : k)) (x : a @ m) = x
+    [@@kind.explicit_plus_unmangled k = (value, bits64)]
+    [@@mode m = (global, local)]
+val f__value : 'a -> 'a = <fun>
+val f : 'a -> 'a = <fun>
+val f__value__local : 'a @ local -> 'a @ local = <fun>
+val f__local : 'a @ local -> 'a @ local = <fun>
+val f__bits64 : ('a : bits64). 'a -> 'a = <fun>
+val f__bits64__local : ('a : bits64). 'a @ local -> 'a @ local = <fun>
+```
+
+### `.default.explicit`
+
+`.default` floating attributes can also take `.default.explicit` and
+`.default.explicit_plus_unmangled` forms.
+
+```ocaml
+# module type%template s = sig
+    [@@@kind.default.explicit k1 = (value, bits64)]
+
+    type ('a : k1) t1
+
+    [@@@kind.default.explicit k2 = (value, bits64)]
+
+    type ('a : k1, 'b : k2) t2
+  end
+module type s =
+  sig
+    type 'a t1__value
+    type ('a, 'b) t2__value__value
+    type ('a, 'b : bits64) t2__value__bits64
+    type ('a : bits64) t1__bits64
+    type ('a : bits64, 'b) t2__bits64__value
+    type ('a : bits64, 'b : bits64) t2__bits64__bits64
+  end
+```
+
+Multiple attributes on the same axis of different explicitness are not allowed.
+
+```ocaml
+module type%template s = sig
+  [@@@kind.default.explicit k1 = (value, bits64)]
+
+  type ('a : k1) t1
+
+  [@@@kind.default k2 = (value, bits64)]
+
+  type ('a : k1, 'b : k2) t2
+end
+```
+```mdx-error
+Line 6, characters 5-43:
+Error: [%template]: explicitness mismatch while merging floating defaults
+       (explicit vs default)
+```
+
+A poly attribute on some binding completely determines the mangling behavior on that axis,
+even if there are previous floating attributes. This includes both the values used in
+mangling, and the explicitness.
+
+```ocaml
+# module type%template s = sig
+    [@@@kind.default.explicit k = (value, value_or_null)]
+    [@@@mode.default.explicit l = (global, local)]
+
+    (* Note that:
+       - [f] receives mangling only from the kinds in its local [[@@kind]]
+         binding, and not also from the default kind
+       - [f] is mangled according to the non-explicit scheme for kinds, even
+         though there is an explicit [[@@@kind.default]] binding above
+       - [f] still receives the default mode mangling, and that mangling respects
+         the [.explicit]ness of the floating mode attribute
+    *)
+    val f : ('a : k1) ('b : k2). 'a @ l -> 'b
+    [@@kind k1 = k, k2 = (value, bits64)]
+  end
+module type s =
+  sig
+    val f__value__bits64__global : 'a ('b : bits64). 'a -> 'b
+    val f__value__bits64__local : 'a ('b : bits64). 'a @ local -> 'b
+    val f__global : 'a -> 'b
+    val f__value_or_null__bits64__global : 'a ('b : bits64). 'a -> 'b
+    val f__local : 'a @ local -> 'b
+    val f__value_or_null__bits64__local : 'a ('b : bits64). 'a @ local -> 'b
+  end
+```
 
 ## `default_if_multiple`
 
@@ -1305,7 +1413,7 @@ identifier). Fortunately, this restriction is not so limiting because:
 - it is not possible to refer to a previous `val` in a signature
 - `type`s can be destructively substituted by eventual concrete clients later using
   [polymorphic with](#with), so it's fine to use the conventional always-mangling
-  attributes (even if we would ultimately like to end up with unmangled types in some
+  attributes (even if we would ultimately like to end up with untemplated types in some
   cases).
 
 As an example we can write:

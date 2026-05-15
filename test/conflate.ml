@@ -43,7 +43,7 @@ struct
   let g = Y.f
 end
 
-module S__observing (Y : sig
+module S__reading (Y : sig
     include Y
   end) =
 struct
@@ -83,7 +83,7 @@ end
 module _ = struct
   [@@@expand_inline
     [%%template
-    [@@@modality s = (stateful, observing, stateless)]
+    [@@@modality s = (stateful, reading, stateless)]
 
     type u = { field : unit -> unit } [@@modality s]
 
@@ -94,9 +94,9 @@ module _ = struct
   type u = { field : unit -> unit }
   type t__'value_mod_stateful'
   type t__'bits64_mod_stateful'
-  type u__observing = { field : unit -> unit }
-  type t__'value_mod_observing'
-  type t__'bits64_mod_observing'
+  type u__reading = { field : unit -> unit }
+  type t__'value_mod_reading'
+  type t__'bits64_mod_reading'
   type u__stateless = { field : unit -> unit }
   type t__'value_mod_stateless'
   type t__'bits64_mod_stateless'

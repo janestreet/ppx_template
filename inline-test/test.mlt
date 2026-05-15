@@ -230,7 +230,7 @@ Error: Signature mismatch:
        is not compatible with the type n:int -> ('b -> 'b) -> 'b -> 'b
        The layout of 'a is float64
          because of the definition of apply_n_times__float64 at file "test.mlt", lines 210-211, characters 2-31.
-       But the layout of 'a must be a sublayout of value
+       But the layout of 'a must be a value layout
          because of the definition of apply_n_times__float64 at file "test.mlt", lines 213-214, characters 33-58.
        File "test.mlt", lines 210-211, characters 2-31: Expected declaration
        File "test.mlt", line 213, characters 19-32: Actual declaration
@@ -254,7 +254,7 @@ Error: This expression has type a -> a but an expression was expected of type
          'a -> 'a
        The layout of a is float64
          because of the annotation on the abstract type declaration for a.
-       But the layout of a must be a sublayout of value
+       But the layout of a must be a value layout
          because of the annotation on the universal variable 'a.
 |}]
 
@@ -1066,6 +1066,21 @@ Error: You cannot have two attributes for the same axis.
        E.g. you cannot have [let f = ... [@mode.explicit x] [@mode y]].
 |}]
 
+(* Cannot merge floating defaults with mismatched explicitness. *)
+
+[%%template
+[@@@mode.default.explicit l = global]
+[@@@mode.default l = local]
+
+let f x = x]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [%template]: explicitness mismatch while merging floating defaults
+       (explicit vs default)
+|}]
+
 (* explicit attribute does not exist for non-mono, poly, or floating-poly attributes *)
 
 let%template f x = x [@exclave_if_local m] [@@mode m = local]
@@ -1246,10 +1261,15 @@ let id (x @ m) = x [@exclave_if_stack a]]
   {|
 Line _, characters _-_:
 Error: shadowing variables from a different namespace is prohibited
+       (modulo mode/modality conflation)
        attempting to bind
          identifier 'm'
          in namespace '(Mode Locality)'
        but it is already bound
+         in namespace '(Modality Portability)'
+         to the value 'portable'
+         and when fully expanded '(portable)'
+       and
          in namespace '(Mode Portability)'
          to the value 'portable'
          and when fully expanded '(portable)'
@@ -1805,4 +1825,25 @@ Error: apply expected
 Line _, characters _-_:
 Error: You cannot have two attributes for the same axis.
        E.g. you cannot have [let f = ... [@mode.explicit x] [@mode y]].
+|}]
+
+(* Test poly attributes like [@kind k = ks] in positions expecting mono attributes such as
+   [@kind k1 k2]. *)
+
+let%template x = (y [@kind k = ks])
+
+module%template A = B [@mode m = ms]
+
+type%template t = (u[@modality m = ms])
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: Unbound value y__=__k__ks
+
+Line _, characters _-_:
+Error: Unbound module B__=__m__ms
+
+Line _, characters _-_:
+Error: Unbound type constructor u__=__m__ms
 |}]
