@@ -13,10 +13,15 @@ module Definitions = struct
     method module_type : 'ctx -> module_type -> module_type
     method pattern : 'ctx -> pattern -> pattern
     method signature : 'ctx -> signature -> signature
-    method signature_item_inline : 'ctx -> signature_item -> signature_item list
+
+    method signature_item_inline :
+      'ctx -> signature_item -> signature_item Nonempty_list.t
+
     method signature_items : 'ctx -> signature_item list -> signature_item list
     method structure : 'ctx -> structure -> structure
-    method structure_item_inline : 'ctx -> structure_item -> structure_item list
+
+    method structure_item_inline :
+      'ctx -> structure_item -> structure_item Nonempty_list.t
   end
 end
 

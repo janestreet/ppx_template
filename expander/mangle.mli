@@ -5,10 +5,10 @@ open Language.Typed
 module Suffix : sig
   type t
 
-  val create : Value.Basic.packed list Maybe_explicit.t Axis.Map.t -> t
+  val create : Value.Basic.packed list Explicitness.With.t Axis.Map.t -> t
 end
 
-module Result : sig
+module Outcome : sig
   type t
 
   val did_mangle : t -> bool
@@ -28,13 +28,13 @@ end
     global singleton [Mangle] object for every identifier we need to mangle, calling pure
     functions, rather than creating a fresh object with many methods and potentially some
     closures each time. *)
-val t : (Suffix.t, Result.t) Ast_traverse.lift_map_with_context
+val t : (Suffix.t, Outcome.t) Ast_traverse.lift_map_with_context
 
 (** Apply name mangling to the item, using the given attribute expressions and
     environment. *)
 val mangle
-  :  'a Attributes.Context.mono
+  :  'a Attribute_handler.Context.mono
   -> 'a
-  -> Expression.Basic.packed Loc.t list Maybe_explicit.t Axis.Map.t
+  -> Expression.Basic.packed Loc.t list Explicitness.With.t Axis.Map.t
   -> env:Env.t
   -> 'a

@@ -1,0 +1,12 @@
+open! Ppx_template_test_common
+
+
+(* Substitution of kind variables under scannable axes is not supported. *)
+
+type%template ('a : k non_pointer) t = int [@@kind k = value]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: [ppx_template] substitution of kind variables under scannable axes is not supported
+|}]

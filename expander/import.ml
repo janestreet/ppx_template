@@ -47,10 +47,12 @@ include struct
   include Sexp_conv
 end
 
-(* Re-export from [Import] to shadow [Result] from [open Stdppx] *)
-module Result = Result
+(* Re-export from [Import] to shadow modules from [open Stdppx] *)
+module Result = Result_with_helpers
+module List = List_with_helpers
 
 (* Convenience functions *)
+let map_fst (x, y) ~f = f x, y
 let map_snd (x, y) ~f = x, f y
 
 (* Make [Sexp.t] constructors always in scope *)

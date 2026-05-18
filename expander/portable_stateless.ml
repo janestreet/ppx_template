@@ -48,7 +48,7 @@ let mk_pmb_type pmb_type ~loc ~mvar =
                (Ppxlib_jane.Shim.Signature.to_parsetree
                   { signature with
                     psg_modalities =
-                      Loc.make ~loc (Modality mvar) :: signature.psg_modalities
+                      Loc.map mvar ~f:(fun x -> Modality x) :: signature.psg_modalities
                   ; psg_loc = loc
                   }))
       ; pmty_loc = loc
@@ -58,7 +58,7 @@ let mk_pmb_type pmb_type ~loc ~mvar =
         ~loc
         (Ast_builder.signature
            ~loc
-           ~modalities:[ Loc.make ~loc (Modality mvar) ]
+           ~modalities:[ Loc.map mvar ~f:(fun x -> Modality x) ]
            [ Ast_builder.psig_include
                ~loc
                ~modalities:[]
@@ -106,7 +106,7 @@ let mk_pmb_expr pmb_expr ~loc ~mvar =
 
 let mvals ~loc = function
   | Portable -> [%expr portable, nonportable]
-  | Stateless -> [%expr stateless, observing, stateful]
+  | Stateless -> [%expr stateless, reading, stateful]
 ;;
 
 (* [@@template.modality `mvar` = `mvals ~loc t`] *)
@@ -114,39 +114,47 @@ let modality_attribute t ~loc ~mvar =
   Ast_builder.attribute
     ~loc
     ~name:(Loc.make ~loc "template.modality")
-    ~payload:(PStr [%str [%e Ast_builder.evar ~loc mvar] = [%e mvals ~loc t]])
+    ~payload:
+      (PStr [%str [%e Ast_builder.evar ~loc:mvar.loc mvar.txt] = [%e mvals ~loc t]])
 ;;
 
-let modality_attr t context =
-  Attribute.declare
-    (Printf.sprintf "template.%s.modality" (to_string t))
-    context
-    Ast_pattern.(single_expr_payload (pexp_ident (lident __)))
-    Fn.id
+let attr_handler = function
+  | Portable -> Attribute_handler.functor_portable
+  | Stateless -> Attribute_handler.functor_stateless
 ;;
 
-let modality_attrs_binding = List.map all ~f:(fun t -> t, modality_attr t Module_binding)
-
-let modality_attrs_declaration =
-  List.map all ~f:(fun t -> t, modality_attr t Module_declaration)
+let mk_error
+  : type a.
+    ctx:(a, [ `module_binding | `module_declaration ]) Attribute_handler.Context.t
+    -> error:Syntax_error.t
+    -> loc:location
+    -> mod_:a
+    -> a
+  =
+  fun ~ctx ~error ~loc ~mod_ ->
+  match ctx with
+  | Module_binding ->
+    { mod_ with
+      pmb_expr = Ast_builder.pmod_extension ~loc (Syntax_error.to_extension error)
+    }
+  | Module_declaration ->
+    { mod_ with
+      pmd_type = Ast_builder.pmty_extension ~loc (Syntax_error.to_extension error)
+    }
 ;;
 
-let modality_attr_binding t = List.assoc t modality_attrs_binding
-let modality_attr_declaration t = List.assoc t modality_attrs_declaration
+let gensym ~loc = { loc; txt = Ppxlib.gen_symbol ~prefix:"modality" () }
 
-(* Look for [@@modality m], e.g.
-   {[
-     module%template.portable [@modality m] F ...
-   ]}
-*)
-let consume attr mod_ =
-  match Attribute.consume attr mod_ with
-  | Some value -> value
-  | None -> mod_, Ppxlib.gen_symbol ~prefix:"modality" ()
+let handle_attribute t ctx ~loc ~mod_ =
+  match Attribute_handler.consume (attr_handler t) ctx mod_ with
+  | Ok (mod_, Some mvar) -> mod_, mvar
+  | Ok (mod_, None) -> mod_, gensym ~loc
+  | Error error -> mk_error ~ctx ~error ~loc ~mod_, gensym ~loc
 ;;
 
 let module_binding t ~loc ~mod_ =
-  let mod_, mvar = consume (modality_attr_binding t) mod_ in
+  let loc = { loc with loc_ghost = true } in
+  let mod_, mvar = handle_attribute t Module_binding ~loc ~mod_ in
   Ast_builder.pstr_module
     ~loc
     { mod_ with
@@ -156,7 +164,8 @@ let module_binding t ~loc ~mod_ =
 ;;
 
 let module_declaration t ~loc ~mod_ =
-  let mod_, mvar = consume (modality_attr_declaration t) mod_ in
+  let loc = { loc with loc_ghost = true } in
+  let mod_, mvar = handle_attribute t Module_declaration ~loc ~mod_ in
   Ast_builder.psig_module
     ~loc
     { mod_ with

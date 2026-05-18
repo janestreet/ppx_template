@@ -23,7 +23,6 @@ let rec mangle_value : type a. a Type.non_tuple Value.t -> string =
 ;;
 
 let concat_with_underscores = String.concat ~sep:"__"
-let map_fst (x, y) ~f = f x, y
 
 module Suffix = struct
   type t = string list loc
@@ -31,10 +30,11 @@ module Suffix = struct
   let is_empty t = List.is_empty t.txt
 
   let create mono =
+    let open Explicitness.With.Export in
     let extract axis =
       match Axis.Map.find_opt (P axis) mono with
       | None -> []
-      | Some (explicitness, manglers) ->
+      | Some { explicitness; what = manglers } ->
         List.fold_right
           manglers
           ~init:Axis.Sub_axis.Map.empty
@@ -44,11 +44,13 @@ module Suffix = struct
         |> List.concat_map ~f:(fun (_, manglers) ->
           (* We check whether an axis is all defaults, as we don't include those in the
              name mangling scheme. *)
-          match (explicitness : Maybe_explicit.explicitness) with
+          match (explicitness : Explicitness.t) with
           | Drop_axis_if_all_defaults
             when List.for_all manglers ~f:(fun (Value.Basic.P value) ->
-                   Value.is_default value) -> []
-          | Drop_axis_if_all_defaults | Explicit ->
+                   match Value.defaultness value with
+                   | Actual_default | Default_for_standard_mangling -> true
+                   | Not_a_default -> false) -> []
+          | Drop_axis_if_all_defaults | Explicit | Explicit_plus_unmangled ->
             List.map manglers ~f:(fun (P value) ->
               let mangler = mangle_value value in
               (* sets are surrounded with additional [''] to disambiguate from the non-set
@@ -80,7 +82,7 @@ let mangle_error { txt; loc } kind explicitly_drop_method node =
     (concat_with_underscores txt)
 ;;
 
-module Result = struct
+module Outcome = struct
   type t =
     | Did_not_mangle
     | Mangled
@@ -101,7 +103,7 @@ end
 
 let t =
   object (self)
-    inherit [Suffix.t, Result.t] Ast_traverse.lift_map_with_context as super
+    inherit [Suffix.t, Outcome.t] Ast_traverse.lift_map_with_context as super
     method other _ _ = Did_not_mangle
     method unit _ () = (), Did_not_mangle
     method bool _ b = b, Did_not_mangle
@@ -116,13 +118,13 @@ let t =
       let res, a =
         Array.fold_left_map a ~init:Did_not_mangle ~f:(fun acc x ->
           let x, res = f suffix x in
-          Result.mangled_either acc res, x)
+          Outcome.mangled_either acc res, x)
       in
       a, res
 
-    method record _ r = r |> List.map ~f:snd |> Result.mangled_any
-    method constr _ _ c = Result.mangled_any c
-    method tuple _ t = Result.mangled_any t
+    method record _ r = r |> List.map ~f:snd |> Outcome.mangled_any
+    method constr _ _ c = Outcome.mangled_any c
+    method tuple _ t = Outcome.mangled_any t
 
     method string suffix name =
       if Suffix.is_empty suffix
@@ -260,27 +262,34 @@ let t =
       |> map_fst ~f:(fun pmtd_name -> { decl with pmtd_name })
 
     method! include_infos _ suffix info =
-      let mangled : Result.t =
+      let mangled : Outcome.t =
         if Suffix.is_empty suffix then Did_not_mangle else Mangled
       in
       info, mangled
   end
 ;;
 
-let mangle (type a) (attr_ctx : a Attributes.Context.mono) (node : a) mangle_exprs ~env =
+let mangle
+  (type a)
+  (attr_ctx : a Attribute_handler.Context.mono)
+  (node : a)
+  mangle_exprs
+  ~env
+  =
   if Axis.Map.is_empty mangle_exprs
   then node
   else (
     let results =
       Axis.Map.map
         (fun me ->
-          Maybe_explicit.map me ~f:(fun exprs ->
-            List.map exprs ~f:(fun { txt = Expression.Basic.P expr; loc } ->
-              Import.Result.map
-                (Env.eval_singleton env { txt = expr; loc })
-                ~f:(fun value -> Value.Basic.P value))
-            |> Import.Result.all)
-          |> Maybe_explicit.ok)
+          Explicitness.With.map me ~f:(fun exprs ->
+            List.Or_first_error.map
+              exprs
+              ~f:(fun { txt = Expression.Basic.P expr; loc } ->
+                Result.map
+                  (Env.eval_singleton env { txt = expr; loc })
+                  ~f:(fun value -> Value.Basic.P value)))
+          |> Explicitness.With.ok)
         mangle_exprs
     in
     let manglers =
@@ -300,7 +309,7 @@ let mangle (type a) (attr_ctx : a Attributes.Context.mono) (node : a) mangle_exp
     match Axis.Map.to_list errors with
     | [] ->
       let suffix = Suffix.create manglers in
-      let (node : a), (_ : Result.t) =
+      let (node : a), (_ : Outcome.t) =
         match attr_ctx with
         | Expression -> t#expression suffix node
         | Module_expr -> t#module_expr suffix node
@@ -310,12 +319,12 @@ let mangle (type a) (attr_ctx : a Attributes.Context.mono) (node : a) mangle_exp
       node
     | [ (_, err) ] ->
       Syntax_error_conversion.to_extension_node
-        (Attributes.Context.mono_to_any attr_ctx)
+        (Attribute_handler.Context.mono_to_any attr_ctx)
         node
         err
     | (_, err) :: (_ :: _ as alist) ->
       Syntax_error_conversion.to_extension_node
-        (Attributes.Context.mono_to_any attr_ctx)
+        (Attribute_handler.Context.mono_to_any attr_ctx)
         node
-        (Syntax_error.combine err (List.map alist ~f:snd)))
+        (Syntax_error.combine (err :: List.map alist ~f:snd)))
 ;;

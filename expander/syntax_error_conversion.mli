@@ -6,8 +6,8 @@ open! Import
     [node] are also going to be dropped, they can be passed via [~also_drop]. *)
 val to_extension_node
   : 'a.
-  ?also_drop:'a list -> 'a Attributes.Context.any -> 'a -> Syntax_error.t -> 'a
+  ?also_drop:'a list -> 'a Attribute_handler.Context.any -> 'a -> Syntax_error.t -> 'a
 
 val to_extension_node_floating
   : 'a.
-  'a Attributes.Floating.Context.poly -> loc:location -> Syntax_error.t -> 'a
+  'a Attribute_handler.Floating.Context.poly -> loc:location -> Syntax_error.t -> 'a

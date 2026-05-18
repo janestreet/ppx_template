@@ -4,15 +4,53 @@ open Language.Typed
 module Type = Language.Type
 
 module Definitions = struct
-  module Poly = struct
-    type 'mangle binding = Binding : (_, 'mangle) Binding.with_mangle -> 'mangle binding
+  type lookup =
+    | Preserve_atoms
+    (** When evaluating, do not expand identifiers into the set they represent. This form
+        of lookup is used when evaluating set mono and poly attributes for the purposes of
+        mangling, because we mangle by _names_ of sets, not canonical representations of
+        their contents. *)
+    | Expand_atoms_bound_to_sets
+    (** When evaluating, fully expand all identifiers. This form of lookup is used when
+        evaluating the right hand side of a non-set binding, since here we wish to bind
+        the pattern on the left against all values in the set on the right *)
 
+  module Binding = struct
+    type 'a t =
+      { pattern : 'a Pattern.t
+      ; expression : ('a, Expression.set) Expression.t Loc.t
+      ; lookup : lookup
+      }
+
+    module Selector = struct
+      type ('bind, 'select) t =
+        | Id : ('a, 'a) t (** most bindings *)
+        | Fst : ('a * 'b, 'a) t (** [[@@alloc (a @ m) = ...]] and similar bindings *)
+    end
+
+    module With_selector = struct
+      type nonrec ('bind, 'select) t =
+        { binding : 'bind t
+        ; selector : ('bind, 'select Type.non_tuple) Selector.t
+        (** When an item [let lhs = rhs [@@attr pat = (expr1, expr2)]] is evaluated e.g.
+            on [expr1], the expression gets evaluated to a [Value.t]. A selector
+            determines what part of the [value] to use to mangle [lhs]. This is used to
+            enable [[@@alloc (a @ m) = ...]] to mangle only based on [a]. *)
+        }
+
+      type 'select packed = P : (_, 'select) t -> 'select packed
+    end
+  end
+
+  module Poly = struct
     type t =
-      | Poly : 'mangle Type.non_tuple Axis.t * 'mangle Type.non_tuple binding list -> t
+      | Poly :
+          'select Type.non_tuple Axis.t * 'select Binding.With_selector.packed list
+          -> t
   end
 
   module Mono = struct
-    type t = Expression.Basic.packed Loc.t list Maybe_explicit.t Axis.Map.t
+    type t = Expression.Basic.packed Loc.t list Explicitness.With.t Axis.Map.t
   end
 
   type poly_w =
@@ -100,9 +138,23 @@ module Definitions = struct
   end
 end
 
-module type Attributes = sig
+module type Attribute_handler = sig
   include module type of struct
     include Definitions
+  end
+
+  module Binding : sig
+    include module type of struct
+      include Binding
+    end
+
+    module Selector : sig
+      include module type of struct
+        include Selector
+      end
+
+      val select : ('bind, 'select) t -> 'bind Value.t -> 'select Value.t
+    end
   end
 
   module Context : sig
@@ -136,7 +188,7 @@ module type Attributes = sig
     val find_exn
       :  ('w, 'b) t
       -> ('a, 'w) Context.t
-      -> ('a, 'b) Attribute.t Maybe_explicit.Both.t
+      -> ('a, 'b) Attribute.t Explicitness.Each.t
   end
 
   module Poly : module type of struct
@@ -146,7 +198,7 @@ module type Attributes = sig
   (** A handler for attributes that make definitions/declarations polymorphic. Might
       return an [Error _] if the attribute's payload is malformed. Defaults to
       [Ok { kinds = None; modes = None }]. *)
-  val poly : (poly_w, Poly.t Maybe_explicit.t list) t
+  val poly : (poly_w, Poly.t Explicitness.With.t list) t
 
   module Mono : sig
     include module type of struct
@@ -205,6 +257,8 @@ module type Attributes = sig
 
   val with_ : ([ `module_type ], signature option) t
   val with_attr : (module_type, (signature, Syntax_error.t) result) Attribute.t
+  val functor_portable : ([ `module_binding | `module_declaration ], string loc option) t
+  val functor_stateless : ([ `module_binding | `module_declaration ], string loc option) t
 
   val error_you_can_only_use_one_attribute_per_axis
     :  loc:location
@@ -257,7 +311,7 @@ module type Attributes = sig
 
     type t =
       | Define of Define.t
-      | Poly of Poly.t Maybe_explicit.t
+      | Poly of Poly.t Explicitness.With.t
 
     (** Check if the provided ast node is a floating template attribute, and evaluate its
         contents. Marks the attribute as seen. Returns an [Error _] if the payload of the

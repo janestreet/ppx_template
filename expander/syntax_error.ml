@@ -9,12 +9,15 @@ let createf ~loc fmt =
     fmt
 ;;
 
-let combine t list =
-  Error.make
-    (Error.main_msg t)
-    ~sub:
-      (Error.sub_msgs t
-       @ List.concat_map list ~f:(fun err -> Error.main_msg err :: Error.sub_msgs err))
+let combine (hd :: tl : _ Nonempty_list.t) =
+  if List.is_empty tl
+  then hd
+  else
+    Error.make
+      (Error.main_msg hd)
+      ~sub:
+        (Error.sub_msgs hd
+         @ List.concat_map tl ~f:(fun err -> Error.main_msg err :: Error.sub_msgs err))
 ;;
 
 (* Once we import ppxlib 0.37, ppxlib location errors will be exposed as equivalent to [t]

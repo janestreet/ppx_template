@@ -1,8 +1,25 @@
 open! Stdppx
 open! Import
 open Language
-include Attributes_intf.Definitions
+include Attribute_handler_intf.Definitions
 open Result.Let_syntax
+
+module Binding = struct
+  include Binding
+
+  module Selector = struct
+    include Selector
+
+    let select
+      : type bind select. (bind, select) t -> bind Typed.Value.t -> select Typed.Value.t
+      =
+      fun selector value ->
+      match selector, value with
+      | Id, _ -> value
+      | Fst, Tuple (hd :: _) -> hd
+    ;;
+  end
+end
 
 module type Context = sig
   type ('a, 'w) t : immediate
@@ -19,7 +36,7 @@ end
 
 module With_attribute_maybe_explicit (Context : Context) (Attribute : Attribute) = struct
   type ('w, 'b) t =
-    | T : ('a, 'w) Context.t * ('a, 'b) Attribute.t Maybe_explicit.Both.t -> ('w, 'b) t
+    | T : ('a, 'w) Context.t * ('a, 'b) Attribute.t Explicitness.Each.t -> ('w, 'b) t
 end
 
 module With_attribute (Context : Context) (Attribute : Attribute) = struct
@@ -80,7 +97,7 @@ module Make_maybe_explicit
     val find_exn
       :  ('w, 'b) t
       -> ('a, 'w) Context.t
-      -> ('a, 'b) Attribute.t Maybe_explicit.Both.t
+      -> ('a, 'b) Attribute.t Explicitness.Each.t
   end
 
   val declare
@@ -97,7 +114,7 @@ end = struct
         Map_poly.t
 
     let find_exn (type a w b) (t : (w, b) t) (ctx : (a, w) Context.t)
-      : (a, b) Attribute.t Maybe_explicit.Both.t
+      : (a, b) Attribute.t Explicitness.Each.t
       =
       let (T (ctx', attribute)) = Map_poly.find_exn t (T ctx) in
       let Equal = Context.same_witness_exn ctx ctx' in
@@ -109,10 +126,11 @@ end = struct
     Map_poly.of_list
       (List.map contexts ~f:(fun (T context as key : _ Context.packed) ->
          let attribute =
-           Maybe_explicit.Both.create (fun explicit ->
+           Explicitness.Each.create (fun explicit ->
              let name =
                match explicit with
                | Explicit -> name ^ ".explicit"
+               | Explicit_plus_unmangled -> name ^ ".explicit_plus_unmangled"
                | Drop_axis_if_all_defaults -> name
              in
              Attribute.declare ("template." ^ name) (Context.to_ppxlib context) pattern k)
@@ -370,22 +388,25 @@ let consume_attr
   ('a, 'b) Attribute_map.t
   -> ('c, 'a) Context.t
   -> 'c
-  -> ('c * (Maybe_explicit.explicitness * 'b, Syntax_error.t) result) option
+  -> ('c * ('b Explicitness.With.t, Syntax_error.t) result) option
   =
   fun attr ctx ast ->
-  Maybe_explicit.Both.opt_fold_map
-    (Attribute_map.find_exn attr ctx)
-    ~init:ast
-    ~f:(fun ast attr ->
-      match Attribute.consume_res attr ast with
-      | Ok None -> ast, None
-      | Ok (Some (ast, res)) -> ast, Some (Ok res)
-      | Error errors -> ast, Some (Error (Syntax_error.of_location_errors errors)))
-  |> function
-  | _, Neither -> None
-  | ast, One (explicitness, Ok res) -> Some (ast, Ok (explicitness, res))
-  | ast, One (_, Error err) -> Some (ast, Error err)
-  | ast, Both _ ->
+  let ast, attrs =
+    Explicitness.Each.fold_map
+      (Attribute_map.find_exn attr ctx)
+      ~init:ast
+      ~f:(fun ast attr ->
+        match Attribute.consume_res attr ast with
+        | Ok None -> ast, None
+        | Ok (Some (ast, res)) -> ast, Some (Ok res)
+        | Error errors -> ast, Some (Error (Syntax_error.of_location_errors errors)))
+  in
+  match Explicitness.Each.combine attrs with
+  | Ok None -> None
+  | Ok (Some { explicitness; what = Ok res }) ->
+    Some (ast, Ok { explicitness; what = res })
+  | Ok (Some { explicitness = _; what = Error e }) -> Some (ast, Error e)
+  | Error `multiple ->
     let loc = Context.location ctx ast in
     Some (ast, error_you_can_only_use_one_attribute_per_axis ~loc)
 ;;
@@ -500,27 +521,24 @@ module Poly = struct
                   ])))
     in
     let duplicate_pattern_error = validate_no_duplicate_patterns ~loc bindings in
-    let+ (_ : unit list) =
-      duplicate_pattern_error :: duplicate_expression_errors |> Result.collect_errors
-    in
-    ()
+    duplicate_pattern_error :: duplicate_expression_errors
+    |> Result.syntax_errors_of_unit_list
   ;;
 
   let type_check_one (pattern, expressions) ~loc ~expected ~allow_set ~lookup =
     let* pattern = Typed.Pattern.type_check pattern ~expected in
     let+ expressions =
-      Nonempty_list.map_result expressions ~f:(fun { txt = expr; loc = _ } ->
+      Nonempty_list.Or_first_error.map expressions ~f:(fun { txt = expr; loc = _ } ->
         let+ expr = Typed.Expression.type_check expr ~expected ~allow_set in
         Typed.Expression.to_set expr)
     in
     let expression : _ Typed.Expression.t loc = { txt = Union expressions; loc } in
-    ({ pattern; expression; lookup } : _ Typed.Binding.t)
+    ({ pattern; expression; lookup } : _ Binding.t)
   ;;
 
   let type_check_many bindings ~expected ~allow_set ~lookup =
-    List.map bindings ~f:(fun { txt = binding; loc } ->
+    List.Or_first_error.map bindings ~f:(fun { txt = binding; loc } ->
       type_check_one binding ~loc ~expected ~allow_set ~lookup)
-    |> Result.all
   ;;
 
   let type_check_many_not_a_tuple
@@ -528,13 +546,14 @@ module Poly = struct
     ~expected
     ~allow_set
     ~mangle_axis
-    ~mangle
+    ~selector
     ~lookup
     =
     let+ bindings = type_check_many bindings ~expected ~allow_set ~lookup in
     Poly
       ( mangle_axis
-      , List.map bindings ~f:(fun binding -> Binding { binding; mangle; mangle_axis }) )
+      , List.map bindings ~f:(fun binding ->
+          Binding.With_selector.P { binding; selector }) )
   ;;
 
   let type_check_many_maybe_tuple
@@ -543,11 +562,10 @@ module Poly = struct
     ~(expected : expected Type.non_tuple Type.t)
     ~allow_set
     ~mangle_axis
-    ~mangle
     ~lookup
     =
     let+ bindings =
-      List.map bindings ~f:(fun { txt = (pattern, _) as binding; loc } ->
+      List.Or_first_error.map bindings ~f:(fun { txt = (pattern, _) as binding; loc } ->
         (* Determine whether the binding is a tuple binding via the shape of [pattern] *)
         match (pattern : Untyped.Pattern.t) with
         | Tuple patterns ->
@@ -564,14 +582,12 @@ module Poly = struct
           in
           let (P tuple) = loop patterns in
           let expected = Type.Tuple tuple in
-          let mangle (Typed.Value.Tuple (hd :: _)) = hd in
           let+ binding = type_check_one binding ~loc ~allow_set ~expected ~lookup in
-          Poly.Binding { binding; mangle_axis; mangle }
+          Binding.With_selector.P { binding; selector = Fst }
         | _ ->
           (* If the pattern is just an identifier, assume it's not a tuple binding *)
           let+ binding = type_check_one binding ~loc ~allow_set ~expected ~lookup in
-          Poly.Binding { binding; mangle_axis; mangle })
-      |> Result.all
+          Binding.With_selector.P { binding; selector = Id })
     in
     Poly (mangle_axis, bindings)
   ;;
@@ -617,25 +633,23 @@ let consume_poly
   : 'a.
   ('a, 'w) Context.t
   -> 'a
-  -> 'a * ((Maybe_explicit.explicitness * Poly.t) list, Syntax_error.t) result
+  -> 'a * (Poly.t Explicitness.With.t list, Syntax_error.t) result
   =
   fun ctx item ->
   let consume
     : 'b.
     ('w, 'b) Attribute_map.t
     -> 'a
-    -> 'a * (Maybe_explicit.explicitness * 'b, Syntax_error.t) result option
+    -> 'a * ('b Explicitness.With.t, Syntax_error.t) result option
     =
     fun attr item ->
     match consume_attr attr ctx item with
     | None -> item, None
     | Some (item, bindings) -> item, Some bindings
   in
-  let type_check_opt type_check bindings ~expected ~allow_set ~mangle_axis ~mangle ~lookup
-    =
+  let type_check_opt bindings type_check =
     Option.map bindings ~f:(fun bindings ->
-      Maybe_explicit.map_result bindings ~f:(fun bindings ->
-        type_check bindings ~expected ~allow_set ~mangle_axis ~mangle ~lookup))
+      Explicitness.With.map_result bindings ~f:(fun bindings -> type_check bindings))
   in
   let item, kinds = consume Poly.kind_attr item in
   let item, kind_sets = consume Poly.kind_set_attr item in
@@ -656,98 +670,94 @@ let consume_poly
     let* typed =
       let kinds =
         type_check_opt
-          Poly.type_check_many_maybe_tuple
           kinds
-          ~expected:Type.kind
-          ~allow_set:Set_or_singleton
-          ~mangle_axis:(Singleton Kind)
-          ~mangle:Fn.id
-          ~lookup:Expand_atoms_bound_to_sets
+          (Poly.type_check_many_maybe_tuple
+             ~expected:Type.kind
+             ~allow_set:Set_or_singleton
+             ~mangle_axis:(Singleton Kind)
+             ~lookup:Expand_atoms_bound_to_sets)
       in
       let kind_sets =
         type_check_opt
-          Poly.type_check_many_maybe_tuple
           kind_sets
-          ~expected:Type.kind
-          ~allow_set:(Singleton_only { why_no_set = Hint.no_unions_in_kind_sets })
-          ~mangle_axis:(Set Kind)
-          ~mangle:Fn.id
-          ~lookup:Preserve_atoms
+          (Poly.type_check_many_maybe_tuple
+             ~expected:Type.kind
+             ~allow_set:(Singleton_only { why_no_set = Hint.no_unions_in_kind_sets })
+             ~mangle_axis:(Set Kind)
+             ~lookup:Preserve_atoms)
       in
       let modes =
         type_check_opt
-          Poly.type_check_many_maybe_tuple
           modes
-          ~expected:Type.mode
-          ~allow_set:(Singleton_only { why_no_set = Hint.sets_unsupported "mode" })
-          ~mangle_axis:(Singleton Mode)
-          ~mangle:Fn.id
-          ~lookup:Expand_atoms_bound_to_sets
+          (Poly.type_check_many_maybe_tuple
+             ~expected:Type.mode
+             ~allow_set:(Singleton_only { why_no_set = Hint.sets_unsupported "mode" })
+             ~mangle_axis:(Singleton Mode)
+             ~lookup:Expand_atoms_bound_to_sets)
       in
       let modalities =
         type_check_opt
-          Poly.type_check_many_maybe_tuple
           modalities
-          ~expected:Type.modality
-          ~allow_set:(Singleton_only { why_no_set = Hint.sets_unsupported "modality" })
-          ~mangle_axis:(Singleton Modality)
-          ~mangle:Fn.id
-          ~lookup:Expand_atoms_bound_to_sets
+          (Poly.type_check_many_maybe_tuple
+             ~expected:Type.modality
+             ~allow_set:(Singleton_only { why_no_set = Hint.sets_unsupported "modality" })
+             ~mangle_axis:(Singleton Modality)
+             ~lookup:Expand_atoms_bound_to_sets)
       in
       let allocs =
         match
           type_check_opt
-            Poly.type_check_many_not_a_tuple
             allocs
-            ~expected:Type.alloc
-            ~allow_set:(Singleton_only { why_no_set = Hint.no_sets_in "alloc" })
-            ~mangle_axis:(Singleton Alloc)
-            ~mangle:Fn.id
-            ~lookup:Preserve_atoms
+            (Poly.type_check_many_not_a_tuple
+               ~expected:Type.alloc
+               ~allow_set:(Singleton_only { why_no_set = Hint.no_sets_in "alloc" })
+               ~mangle_axis:(Singleton Alloc)
+               ~selector:Id
+               ~lookup:Preserve_atoms)
         with
         | (Some (Ok _) | None) as res -> res
         | Some (Error _) ->
           type_check_opt
-            Poly.type_check_many_not_a_tuple
             allocs
-            ~expected:Type.(tuple2 alloc mode)
-            ~allow_set:(Singleton_only { why_no_set = Hint.no_sets_in "alloc" })
-            ~mangle_axis:(Singleton Alloc)
-            ~mangle:(fun (Tuple [ alloc; _mode ]) -> alloc)
-            ~lookup:Preserve_atoms
+            (Poly.type_check_many_not_a_tuple
+               ~expected:Type.(tuple2 alloc mode)
+               ~allow_set:(Singleton_only { why_no_set = Hint.no_sets_in "alloc" })
+               ~mangle_axis:(Singleton Alloc)
+               ~selector:Fst
+               ~lookup:Preserve_atoms)
       in
       let synchros =
         match
           type_check_opt
-            Poly.type_check_many_not_a_tuple
             synchros
-            ~expected:Type.synchro
-            ~allow_set:(Singleton_only { why_no_set = Hint.no_sets_in "synchro" })
-            ~mangle_axis:(Singleton Synchro)
-            ~mangle:Fn.id
-            ~lookup:Preserve_atoms
+            (Poly.type_check_many_not_a_tuple
+               ~expected:Type.synchro
+               ~allow_set:(Singleton_only { why_no_set = Hint.no_sets_in "synchro" })
+               ~mangle_axis:(Singleton Synchro)
+               ~selector:Id
+               ~lookup:Preserve_atoms)
         with
         | (Some (Ok _) | None) as res -> res
         | Some (Error _) ->
           type_check_opt
-            Poly.type_check_many_not_a_tuple
             synchros
-            ~expected:Type.(tuple2 synchro mode)
-            ~allow_set:(Singleton_only { why_no_set = Hint.no_sets_in "synchro" })
-            ~mangle_axis:(Singleton Synchro)
-            ~mangle:(fun (Tuple [ synchro; _mode ]) -> synchro)
-            ~lookup:Preserve_atoms
+            (Poly.type_check_many_not_a_tuple
+               ~expected:Type.(tuple2 synchro mode)
+               ~allow_set:(Singleton_only { why_no_set = Hint.no_sets_in "synchro" })
+               ~mangle_axis:(Singleton Synchro)
+               ~selector:Fst
+               ~lookup:Preserve_atoms)
       in
       [ kinds; kind_sets; modes; modalities; allocs; synchros ]
       |> List.filter_opt
       |> List.map ~f:(Type_error.lift_to_error_result ~loc:(get_loc ctx item))
-      |> Result.collect_errors
+      |> Result.syntax_errors_of_list
     in
-    let+ (_ : unit list) =
+    let+ () =
       untyped
-      |> List.map ~f:(fun (_explicitness, binding) ->
-        binding |> Poly.validate_bindings ~loc:(get_loc ctx item))
-      |> Result.collect_errors
+      |> List.map ~f:(fun with_ ->
+        with_ |> Explicitness.With.what |> Poly.validate_bindings ~loc:(get_loc ctx item))
+      |> Result.syntax_errors_of_unit_list
     in
     typed
   in
@@ -788,7 +798,7 @@ module Mono = struct
            Loc.make ~loc (Typed.Expression.Basic.P expr))
           |> Loc.make ~loc)
         |> List.map ~f:(fun { loc; txt } -> Type_error.lift_to_error_result txt ~loc)
-        |> Result.collect_errors)
+        |> Result.syntax_errors_of_list)
   ;;
 
   let kind_attr = declare "kind" Type.kind
@@ -804,18 +814,18 @@ let consume_mono
   ('c, 'w) Context.t
   -> 'c
   -> 'c
-     * ( Typed.Expression.Basic.packed loc list Maybe_explicit.t Typed.Axis.Map.t
+     * ( Typed.Expression.Basic.packed loc list Explicitness.With.t Typed.Axis.Map.t
          , Syntax_error.t )
          result
   =
   fun ctx item ->
   let consume
     : 'a 'b.
-    ('a Maybe_explicit.t Typed.Axis.Map.t, Syntax_error.t) result
+    ('a Explicitness.With.t Typed.Axis.Map.t, Syntax_error.t) result
     -> 'b Typed.Axis.t
     -> ('w, ('a, Syntax_error.t) result) Attribute_map.t
     -> 'c
-    -> 'c * ('a Maybe_explicit.t Typed.Axis.Map.t, Syntax_error.t) result
+    -> 'c * ('a Explicitness.With.t Typed.Axis.Map.t, Syntax_error.t) result
     =
     fun mono axis attr item ->
     match consume_attr attr ctx item with
@@ -824,7 +834,7 @@ let consume_mono
       ( item
       , let* mono = mono in
         let* vals = vals in
-        let+ vals = Maybe_explicit.ok vals in
+        let+ vals = Explicitness.With.ok vals in
         Typed.Axis.Map.add (P axis) vals mono )
   in
   let mono = Ok Typed.Axis.Map.empty in
@@ -881,21 +891,23 @@ module Floating = struct
       ('a, ('b, Syntax_error.t) result) Attribute_map.t list
       -> ('c, 'a) Context.t
       -> 'c
-      -> ('b Maybe_explicit.t, Syntax_error.t) result option
+      -> ('b Explicitness.With.t, Syntax_error.t) result option
       =
       fun attrs ctx ast ->
       attrs
       |> List.map ~f:(fun attr -> Attribute_map.find_exn attr ctx)
-      |> Maybe_explicit.Both.all
-      |> Maybe_explicit.Both.opt_map ~f:(fun attr ->
+      |> Explicitness.Each.all
+      |> Explicitness.Each.map ~f:(fun attr ->
         match Attribute.Floating.convert_res attr ast with
         | Ok None -> None
         | Ok (Some res) -> Some res
         | Error errs -> Some (Error (Syntax_error.of_location_errors errs)))
+      |> Explicitness.Each.combine
       |> function
-      | Neither -> None
-      | One res -> Some (Maybe_explicit.ok res)
-      | Both _ -> Some (error_you_can_only_use_one_attribute_per_axis ~loc:Location.none)
+      | Ok None -> None
+      | Ok (Some res) -> Some (Explicitness.With.ok res)
+      | Error `multiple ->
+        Some (error_you_can_only_use_one_attribute_per_axis ~loc:Location.none)
     ;;
 
     type kind =
@@ -946,7 +958,7 @@ module Floating = struct
                            ~loc
                            "[default_if_multiple] with multiple expressions on the RHS \
                             not allowed; use [default] instead"))
-                  |> Result.collect_errors
+                  |> Result.syntax_errors_of_list
               in
               let* () = Attached_poly.validate_bindings bindings ~loc in
               let+ bindings =
@@ -962,7 +974,6 @@ module Floating = struct
           ~expected:Type.kind
           ~allow_set:Set_or_singleton
           ~mangle_axis:(Singleton Kind)
-          ~mangle:Fn.id
           ~lookup:Expand_atoms_bound_to_sets)
     ;;
 
@@ -973,7 +984,6 @@ module Floating = struct
           ~expected:Type.kind
           ~allow_set:(Singleton_only { why_no_set = Hint.no_unions_in_kind_sets })
           ~mangle_axis:(Set Kind)
-          ~mangle:Fn.id
           ~lookup:Preserve_atoms)
     ;;
 
@@ -984,7 +994,6 @@ module Floating = struct
           ~expected:Type.mode
           ~allow_set:(Singleton_only { why_no_set = Hint.sets_unsupported "mode" })
           ~mangle_axis:(Singleton Mode)
-          ~mangle:Fn.id
           ~lookup:Expand_atoms_bound_to_sets)
     ;;
 
@@ -995,7 +1004,6 @@ module Floating = struct
           ~expected:Type.modality
           ~allow_set:(Singleton_only { why_no_set = Hint.sets_unsupported "modality" })
           ~mangle_axis:(Singleton Modality)
-          ~mangle:Fn.id
           ~lookup:Expand_atoms_bound_to_sets)
     ;;
 
@@ -1007,7 +1015,7 @@ module Floating = struct
             ~expected:Type.alloc
             ~allow_set:(Singleton_only { why_no_set = Hint.no_sets_in "alloc" })
             ~mangle_axis:(Singleton Alloc)
-            ~mangle:Fn.id
+            ~selector:Id
             ~lookup:Expand_atoms_bound_to_sets
         with
         | Ok _ as ok -> ok
@@ -1017,7 +1025,7 @@ module Floating = struct
             ~expected:Type.(tuple2 alloc mode)
             ~allow_set:(Singleton_only { why_no_set = Hint.no_sets_in "alloc" })
             ~mangle_axis:(Singleton Alloc)
-            ~mangle:(fun (Tuple [ alloc; _mode ]) -> alloc)
+            ~selector:Fst
             ~lookup:Expand_atoms_bound_to_sets)
     ;;
 
@@ -1029,7 +1037,7 @@ module Floating = struct
             ~expected:Type.synchro
             ~allow_set:(Singleton_only { why_no_set = Hint.no_sets_in "synchro" })
             ~mangle_axis:(Singleton Synchro)
-            ~mangle:Fn.id
+            ~selector:Id
             ~lookup:Expand_atoms_bound_to_sets
         with
         | Ok _ as ok -> ok
@@ -1039,7 +1047,7 @@ module Floating = struct
             ~expected:Type.(tuple2 synchro mode)
             ~allow_set:(Singleton_only { why_no_set = Hint.no_sets_in "synchro" })
             ~mangle_axis:(Singleton Synchro)
-            ~mangle:(fun (Tuple [ synchro; _mode ]) -> synchro)
+            ~selector:Fst
             ~lookup:Expand_atoms_bound_to_sets)
     ;;
 
@@ -1062,18 +1070,18 @@ module Floating = struct
           let name = attr.attr_name.txt in
           if String.is_prefix name ~prefix:"template." then name else "template." ^ name
         in
-        List.concat_map all_attrs ~f:(fun attr ->
+        List.exists all_attrs ~f:(fun attr ->
           Attribute_map.find_exn attr ctx
-          |> Maybe_explicit.Both.extract_list
-          |> List.map ~f:Attribute.Floating.name)
-        |> List.exists ~f:(fun attr_name -> String.equal attr_name ast_attr_name)
+          |> Explicitness.Each.extract_list
+          |> List.exists ~f:(fun attr ->
+            String.equal (Attribute.Floating.name attr) ast_attr_name))
     ;;
 
     let convert
       : 'a.
       ('a, [ `signature_item | `structure_item ]) Context.t
       -> 'a
-      -> (t Maybe_explicit.t option, Syntax_error.t) result
+      -> (t Explicitness.With.t option, Syntax_error.t) result
       =
       fun ctx ast ->
       match convert_attrs all_attrs ctx ast with
@@ -1084,7 +1092,6 @@ module Floating = struct
   end
 
   module Define = struct
-    open Language.Typed
     include Make (Attribute.Floating) (Context)
 
     type t = Define : 'a Type.non_tuple Binding.t list -> t
@@ -1118,8 +1125,8 @@ module Floating = struct
     let kind =
       declare "kind_set" (fun bindings ->
         bindings
-        |> List.map ~f:(fun { txt = pat, expr; loc } : (_ * _ Nonempty_list.t) loc ->
-          { txt = pat, [ expr ]; loc })
+        |> List.map ~f:(fun { txt = pat, expr; loc } ->
+          { txt = pat, Nonempty_list.singleton expr; loc })
         |> Attached_poly.type_check_many
              ~expected:Type.kind
              ~allow_set:Set_or_singleton
@@ -1148,7 +1155,7 @@ module Floating = struct
 
   type t =
     | Define of Define.t
-    | Poly of Poly.t Maybe_explicit.t
+    | Poly of Poly.t Explicitness.With.t
 
   let convert
     : 'a.
@@ -1239,7 +1246,7 @@ module Non_explicit = struct
         | Will_return_unboxed -> "Will_return_unboxed"
       ;;
 
-      let sexp_of_list ts = List (List.map ts ~f:(fun x -> Atom (to_string x)))
+      let sexp_of_t t = Atom (to_string t)
 
       module Error = struct
         let syntax_error ~loc sexp =
@@ -1250,12 +1257,13 @@ module Non_explicit = struct
           let message =
             Sexplib0.Sexp.message
               "Invalid exclave_if reasons (listed individually below)"
-              [ "The following reasons are valid", sexp_of_list all ]
+              [ "The following reasons are valid", sexp_of_list sexp_of_t all ]
           in
           Syntax_error.combine
-            (syntax_error ~loc (List [ Atom "[%template]"; message ]))
-            (List.map provided ~f:(fun (name, loc) ->
-               syntax_error ~loc (List [ Atom "Invalid reason"; Atom name ])))
+            (Nonempty_list.cons
+               (syntax_error ~loc (List [ Atom "[%template]"; message ]))
+               (Nonempty_list.map provided ~f:(fun (name, loc) ->
+                  syntax_error ~loc (List [ Atom "Invalid reason"; Atom name ]))))
         ;;
 
         let contradictory_exclave_reasons ~provided_positive ~provided_negative ~loc =
@@ -1263,8 +1271,8 @@ module Non_explicit = struct
             Sexplib0.Sexp.message
               "Contradictory exclave_if reasons. Some reasons imply an exclave will be \
                required in the future, while others imply it will not."
-              [ "Always exclave", sexp_of_list provided_positive
-              ; "Never exclave", sexp_of_list provided_negative
+              [ "Always exclave", sexp_of_list sexp_of_t provided_positive
+              ; "Never exclave", sexp_of_list sexp_of_t provided_negative
               ]
           in
           syntax_error ~loc (List [ Atom "[%template]"; message ])
@@ -1301,7 +1309,7 @@ module Non_explicit = struct
         match Reason.of_string reason with
         | Some r -> Ok r
         | None -> Error (reason, loc))
-      |> Result.combine_errors
+      |> Result.all_errors_of_list
       |> Result.map_error ~f:(fun provided ->
         Reason.Error.unknown_exclave_reasons ~provided ~loc)
       |> Result.bind ~f:(fun provided ->
@@ -1362,6 +1370,28 @@ module Non_explicit = struct
 
   let exclave_if_local = consume_attr_if Exclave_if.local_attr
   let exclave_if_stack = consume_attr_if Exclave_if.stack_attr
+
+  module Template_functor = struct
+    let declare
+      :  label
+      -> ( [ `module_binding | `module_declaration ]
+           , (string loc, Syntax_error.t) result )
+           Attribute_map.t
+      =
+      fun name ->
+      declare
+        ~name
+        ~contexts:[ T Module_binding; T Module_declaration ]
+        ~pattern:Ast_pattern.(single_expr_payload (pexp_ident (lident __')))
+        ~k:(fun x -> Ok x)
+    ;;
+
+    let portable_attr = declare "portable.modality"
+    let stateless_attr = declare "stateless.modality"
+  end
+
+  let functor_portable = consume_attr_if Template_functor.portable_attr
+  let functor_stateless = consume_attr_if Template_functor.stateless_attr
 
   module Zero_alloc_if = struct
     include Zero_alloc_if
