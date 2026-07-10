@@ -71,6 +71,47 @@ module Suffix = struct
   ;;
 end
 
+let suffix_for_manual_mangling ?modes ?kinds () =
+  let kind_explicitness, (kinds : jkind_annotation list) =
+    Option.value kinds ~default:(Explicitness.Drop_axis_if_all_defaults, [])
+  in
+  let mode_explicitness, (modes : modes) =
+    Option.value modes ~default:(Explicitness.Drop_axis_if_all_defaults, [])
+  in
+  let open Result.Let_syntax in
+  let* kinds =
+    List.map kinds ~f:(fun ({ pjka_loc; _ } as jkind) ->
+      let* jkind =
+        Expression.of_parsetree_jkind jkind
+        |> Result.map_error ~f:(fun { loc; txt } ->
+          Syntax_error.createf ~loc "%s expected" txt)
+      in
+      let+ jkind = Env.eval_singleton Env.initial { txt = jkind; loc = pjka_loc } in
+      (P jkind : Value.Basic.packed))
+    |> Result.syntax_errors_of_list
+  in
+  let+ modes =
+    List.map modes ~f:(fun { txt = Mode mode; loc } ->
+      let+ mode =
+        Env.eval_singleton
+          Env.initial
+          { txt = Identifier { type_ = Non_tuple Mode; ident = mode }; loc }
+      in
+      (P mode : Value.Basic.packed))
+    |> Result.syntax_errors_of_list
+  in
+  let suffix =
+    Suffix.create
+      (Axis.Map.of_list
+         [ ( P (Singleton Kind)
+           , { Explicitness.With.explicitness = kind_explicitness; what = kinds } )
+         ; ( P (Singleton Mode)
+           , { Explicitness.With.explicitness = mode_explicitness; what = modes } )
+         ])
+  in
+  String.concat ~sep:"__" ("" :: suffix.txt)
+;;
+
 let explicitly_drop = Attribute.explicitly_drop
 
 let mangle_error { txt; loc } kind explicitly_drop_method node =

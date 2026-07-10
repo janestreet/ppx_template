@@ -89,3 +89,30 @@ let _use_u = u__'value_or_null_value'
 and _use_u__immediate64 = u__''value_or_null_mod_external64'_value'
 
 [@@@end]
+
+(* Coerce more recent builtin aliases *)
+[@@@expand_inline
+  [%%template
+  let%template u = () [@@kind k = (value_or_null, bits64, untagged_immediate)]
+
+  let%template _use_u = (u [@kind k or (value_or_null, untagged_immediate)])
+  [@@kind
+    k
+    = ( value_or_null
+      , immediate64_or_null
+      , immediate_or_null
+      , untagged_immediate mod global
+      , bits64 )]
+  ;;]]
+
+let u = ()
+and u__bits64 = ()
+and u__untagged_immediate = ()
+
+let _use_u = u
+and _use_u__immediate64_or_null = u
+and _use_u__immediate_or_null = u
+and _use_u__'untagged_immediate_mod_global' = u__untagged_immediate
+and _use_u__bits64 = u__bits64
+
+[@@@end]

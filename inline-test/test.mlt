@@ -1713,8 +1713,8 @@ Error: [ppx_template] syntax error: (_ : (_ : <kind>)) expected
 [%%expect
   {|
 Line _, characters _-_:
-Error: [ppx_template] syntax error: kind abbreviation, mod, or product
-       expected
+Error: [ppx_template] syntax error: unrecognized kind shape: only kind
+       abbreviation, mod, or product expected
 |}]
 
 (* [with]-kinds are unsupported. *)
@@ -1724,8 +1724,8 @@ Error: [ppx_template] syntax error: kind abbreviation, mod, or product
 [%%expect
   {|
 Line _, characters _-_:
-Error: [ppx_template] syntax error: kind abbreviation, mod, or product
-       expected
+Error: [ppx_template] syntax error: unrecognized kind shape: only kind
+       abbreviation, mod, or product expected
 |}]
 
 (* [kind_of_] is unsupported. *)
@@ -1735,8 +1735,8 @@ Error: [ppx_template] syntax error: kind abbreviation, mod, or product
 [%%expect
   {|
 Line _, characters _-_:
-Error: [ppx_template] syntax error: kind abbreviation, mod, or product
-       expected
+Error: [ppx_template] syntax error: unrecognized kind shape: only kind
+       abbreviation, mod, or product expected
 |}]
 
 (* Kind abbreviations are type checked. *)
@@ -1839,11 +1839,25 @@ type%template t = (u[@modality m = ms])
 [%%expect
   {|
 Line _, characters _-_:
-Error: Unbound value y__=__k__ks
+Error: did you write e.g. [@kind ...] when you meant [@@kind ...]?
+       standard (non-operator) identifier expected
 
 Line _, characters _-_:
-Error: Unbound module B__=__m__ms
+Error: did you write e.g. [@kind ...] when you meant [@@kind ...]?
+       standard (non-operator) identifier expected
 
 Line _, characters _-_:
-Error: Unbound type constructor u__=__m__ms
+Error: did you write e.g. [@kind ...] when you meant [@@kind ...]?
+       standard (non-operator) identifier expected
+|}]
+
+(* Other (contrived) cases can trigger this error *)
+
+  type%template t [@@kind k = (k, k mod (l = m))]
+
+[%%expect
+  {|
+Line _, characters _-_:
+Error: did you write e.g. [@kind ...] when you meant [@@kind ...]?
+       standard (non-operator) identifier expected
 |}]

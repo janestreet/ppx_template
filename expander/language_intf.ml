@@ -512,6 +512,10 @@ module type Language = sig
         include Expression
       end
 
+      val of_parsetree_jkind
+        :  Ppxlib_jane.jkind_annotation
+        -> ((Type.kind, _) t, string loc) result
+
       val type_ : ('a, _) t -> 'a Type.t
       val to_set : ('a, _) t -> ('a, set) t
       val untype : ('a, 'allow_set) t -> Untyped.Expression.t
