@@ -14,18 +14,31 @@ let map_pat { pat } ~f = { pat = (fun () -> map1 (pat ()) ~f) }
 let at_most_one_pattern p = p ^:: nil ||| map0 nil ~f:[]
 let at_most_one_eval p = pstr (at_most_one_pattern (pstr_eval p nil))
 
+let is_standard_identifier string =
+  String.equal string (Ppxlib.Longident.name (Lident string))
+;;
+
+let check_standard_identifier ident ~loc =
+  match is_standard_identifier ident with
+  | true -> ()
+  | false ->
+    if String.equal ident "="
+    then
+      Ast_pattern.fail
+        loc
+        "did you write e.g. [@kind ...] when you meant [@@kind ...]?\n\
+         standard (non-operator) identifier"
+      (* error message constructed based on the fact that [fail] adds " expected" *)
+    else Ast_pattern.fail loc "standard (non-operator) identifier"
+;;
+
 let ident_pattern =
   { pat =
       (fun () ->
         pexp_ident
           (map1' (lident __) ~f:(fun loc ident ->
-             match ident with
-             | "@" | "=" ->
-               (* This helps break parsing ambiguity between punning and alternate forms
-                  of alloc-poly (otherwise, [[@@alloc a = heap]] can be parsed as a punned
-                  binding with the identifiers [( = )], [a], and [heap]). *)
-               Ast_pattern.fail loc ("Invalid ppx_template identifier: " ^ ident)
-             | _ -> Pattern.Identifier { ident }))
+             check_standard_identifier ident ~loc;
+             Pattern.Identifier { ident }))
         ||| map0 pexp_hole ~f:Pattern.Wildcard)
   }
 ;;
@@ -78,24 +91,13 @@ let expr =
          , Ppxlib_jane.Shim.Core_type_desc.of_parsetree ptyp_desc )
        with
        | Pexp_hole, Ptyp_any (Some jkind) ->
-         let rec of_jkind : jkind_annotation -> Expression.t = function
-           | { pjka_desc = Pjk_abbreviation ({ txt = Lident ident; _ }, []); _ } ->
-             Typed (Identifier { ident }, P (Non_tuple Kind))
-           | { pjka_desc = Pjk_abbreviation (_, _ :: _); _ } ->
-             expected ~loc "no kind modifiers"
-           | { pjka_desc = Pjk_mod (jkind, mode :: modes); _ } ->
-             let modes =
-               Nonempty_list.map (mode :: modes) ~f:(fun { txt = Mode ident; _ } ->
-                 Expression.Identifier { ident })
-             in
-             Kind_mod (of_jkind jkind, modes)
-           | { pjka_desc = Pjk_product (jkind :: jkinds); _ } ->
-             Kind_product (Nonempty_list.map (jkind :: jkinds) ~f:of_jkind)
-           | { pjka_loc = loc; _ } -> expected ~loc "kind abbreviation, mod, or product"
-         in
-         of_jkind jkind
+         (match Language.Typed.Expression.of_parsetree_jkind jkind with
+          | Ok expr -> Typed (Language.Typed.Expression.untype expr, P (Non_tuple Kind))
+          | Error { loc; txt } -> expected ~loc txt)
        | _ -> expected ~loc "(_ : (_ : <kind>))")
-    | _, Pexp_ident { txt = Lident ident; _ } -> Identifier { ident }
+    | _, Pexp_ident { txt = Lident ident; loc } ->
+      check_standard_identifier ident ~loc;
+      Identifier { ident }
     | [%expr [%e? lhs] & [%e? rhs]], _ ->
       let lhs = of_expr lhs in
       let rhs =

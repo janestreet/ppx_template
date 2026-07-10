@@ -1060,7 +1060,43 @@ and mode-modifiers, we use single quotes for grouping, e.g. `__'value_value'` fo
 and `__'value_mod_portable'` for `value mod portable`. This has a chance of having
 collisions, but these are rare in practice and just produce compile-time errors from ppx-template.
 
-# Tricks and short hands
+# Tips, tricks and short hands
+
+## Recursive functions
+
+Templated functions are expanded to a series of `let ... and ...` bindings, so `let rec`
+looks like a set of mutually recursive functions. The compiler doesn't optimise this well,
+so it's often better to write a recursive function like so:
+
+```ocaml skip
+let%template f x =
+  let rec f_loop x = ... in
+  f_loop x
+[@@kind k = ...]
+```
+
+Note that the inner function has the same name as the outer function, this means the
+symbol name produced by the compiler is easily identifiable which aids debugging.
+
+Additionally, higher-order functions written like this should capture the function
+parameter, rather than passing it as an argument. This allows the compiler to inline the
+outer function and specialize it to the specific function passed in. This still depends
+on the compiler deciding to inline the function, but if you don't do this it (currently)
+doesn't notice that the function is a constant and therefore can't inline the
+higher-order function. This looks something like this:
+
+```ocaml
+let%template map t f =
+  (let rec map t =
+    match[@exclave_if_stack a] t with
+    | [] -> []
+    | hd :: tl -> f hd :: map tl
+  in
+  map t [@nontail]) [@exclave_if_stack a]
+[@@alloc a = (heap, stack)]
+```
+
+## Specialized instances
 
 One may find themselves needing to "lift" OCaml constructs not generated via this ppx to
 have a mangled name compatible with the ppx. We strongly encourage users to do this via

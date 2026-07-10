@@ -33,6 +33,7 @@ include struct
 
   type jkind_annotation = Shim.jkind_annotation
   type mode = Shim.Mode.t = Mode of string [@@unboxed]
+  type modes = Shim.Modes.t
   type modality = Shim.Modality.t = Modality of string [@@unboxed]
 end
 

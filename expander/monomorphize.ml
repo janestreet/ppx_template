@@ -288,12 +288,12 @@ let should_wrap_with_exclave
        in
        let rec is_pure_allocation ({ pexp_desc; pexp_loc; _ } as expr) =
          match Ppxlib_jane.Shim.Expression_desc.of_parsetree pexp_desc ~loc:pexp_loc with
-         | Pexp_tuple labeled_exprs ->
+         | Pexp_tuple labeled_exprs | Pexp_unboxed_tuple labeled_exprs ->
            List.for_all ~f:(fun (_, expr) -> is_pure_allocation expr) labeled_exprs
          | Pexp_construct (_, None) | Pexp_variant (_, None) -> true
          | Pexp_construct (_, Some expr) | Pexp_variant (_, Some expr) ->
            is_pure_allocation expr
-         | Pexp_record (fields, expr) ->
+         | Pexp_record (fields, expr) | Pexp_record_unboxed_product (fields, expr) ->
            List.for_all ~f:(fun (_, e) -> is_pure_allocation e) fields
            &&
              (match expr with

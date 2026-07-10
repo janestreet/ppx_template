@@ -149,7 +149,7 @@ module Weird : sig val id : 'a -> 'a end
 Line _, characters _-_:
 Error: This expression has type 'a or_null
        but an expression was expected of type ('b : value)
-       The layout of 'a or_null is value maybe_separable maybe_null
+       The layout of 'a or_null is value_or_null
          because it is the primitive type or_null.
        But the layout of 'a or_null must be a sublayout of value
          because of the definition of id at file "mangling.mlt", line 139, characters 2-19.

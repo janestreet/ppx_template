@@ -646,6 +646,32 @@ module Typed = struct
   module Expression = struct
     include Expression
 
+    let rec of_parsetree_jkind
+      : jkind_annotation -> ((Type.kind, _) Expression.t, string loc) result
+      = function
+      | { pjka_desc = Pjk_abbreviation ({ txt = Lident ident; _ }, []); _ } ->
+        Ok (Identifier { ident; type_ = Non_tuple Kind })
+      | { pjka_desc = Pjk_abbreviation (_, _ :: _); pjka_loc } ->
+        Error { loc = pjka_loc; txt = "no kind modifiers" }
+      | { pjka_desc = Pjk_mod (jkind, mode :: modes); _ } ->
+        let modes =
+          Nonempty_list.map (mode :: modes) ~f:(fun { txt = Mode ident; _ } ->
+            Expression.Identifier { ident; type_ = Non_tuple Modality })
+        in
+        let+ jkind = of_parsetree_jkind jkind in
+        Kind_mod (jkind, modes)
+      | { pjka_desc = Pjk_product (jkind :: jkinds); _ } ->
+        let+ kinds =
+          Nonempty_list.Or_first_error.map (jkind :: jkinds) ~f:of_parsetree_jkind
+        in
+        Kind_product kinds
+      | { pjka_desc = _; pjka_loc } ->
+        Error
+          { loc = pjka_loc
+          ; txt = "unrecognized kind shape: only kind abbreviation, mod, or product"
+          }
+    ;;
+
     let sexp_of_sets : type s. (string, s) allow_set -> Sexp.t = function
       | Singleton_only _hint -> Atom "singleton"
       | Set_or_singleton -> Atom "set with unions"
